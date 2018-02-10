@@ -54,6 +54,5 @@ main(int argc, char **argv)
 
 	str_cli(stdin, sockfd);		/* do it all */
 
-
 	exit(0);
 }
