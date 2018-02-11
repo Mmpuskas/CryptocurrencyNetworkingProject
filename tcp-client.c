@@ -5,6 +5,7 @@
 #include        <sys/types.h>
 #include        <string.h>
 #include        <unistd.h>
+#include "dataStructs.h"
 
 #define ECHOMAX 255             /* Longest string to echo */
 #define BACKLOG 128
@@ -34,6 +35,36 @@ str_cli(FILE *fp, int sockfd)
         }
 }
 
+void sendStruct(FILE *fp, int sockfd)
+{
+	int blockSize = sizeof(struct block);
+	struct block* blockToSend = malloc(blockSize);
+	ssize_t n;
+
+	for(int i = 0; i < 10; i++)
+		blockToSend->coinAmounts[i] = i + 42;
+
+	// Copy the block into a char array to be sent through the socket
+	char bytesToSend[blockSize];
+	memcpy(bytesToSend, blockToSend, blockSize);
+
+	write(sockfd, bytesToSend, blockSize);
+
+	char stringReceived[blockSize];
+
+	if ( (n = read(sockfd, stringReceived, blockSize)) == 0)
+		DieWithError("str_cli: server terminated prematurely");
+
+	struct block* blockReceived = (struct block*) &stringReceived;
+
+	printf("coinAmounts in block received from server: ");
+	for(int i = 0; i < 10; i++)
+		printf("%d ", blockReceived->coinAmounts[i]);
+	printf("\n");
+
+	free(blockToSend);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -52,7 +83,8 @@ main(int argc, char **argv)
 
 	connect(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr));
 
-	str_cli(stdin, sockfd);		/* do it all */
+	//str_cli(stdin, sockfd);		/* do it all */
+	sendStruct(stdin, sockfd);
 
 	exit(0);
 }

@@ -5,6 +5,7 @@
 #include	<sys/types.h>
 #include	<string.h>
 #include	<unistd.h>
+#include "dataStructs.h"
 
 #define	ECHOMAX	255		/* Longest string to echo */
 #define BACKLOG	128
@@ -30,6 +31,27 @@ EchoString(int sockfd)
     }
 }
 
+void PrintAndEchoStruct(int sockfd)
+{
+	int blockSize = sizeof(struct block);
+	char stringReceived[blockSize + 1];
+	struct block* blockReceived = (struct block*) &stringReceived;
+
+	ssize_t n;
+	if ( (n = read(sockfd, stringReceived, blockSize)) == 0 )
+		return; /* connection closed by other end */
+
+	// Send the data back across the connection
+	write(sockfd, stringReceived, n);
+
+	printf("coinAmounts in block received from client: ");
+	for(int i = 0; i < 10; i++)
+		printf("%d ", blockReceived->coinAmounts[i]);
+	printf("\n");
+
+	fputs(stringReceived, stdout);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -37,7 +59,7 @@ main(int argc, char **argv)
     struct sockaddr_in echoServAddr; /* Local address */
     struct sockaddr_in echoClntAddr; /* Client address */
     unsigned int cliAddrLen;         /* Length of incoming message */
-    char echoBuffer[ECHOMAX];        /* Buffer for echo string */
+    char echoBuffer[sizeof(struct block)];        /* Buffer for echo string */
     unsigned short echoServPort;     /* Server port */
     int recvMsgSize;                 /* Size of received message */
 
@@ -69,6 +91,7 @@ main(int argc, char **argv)
 	cliAddrLen = sizeof(echoClntAddr);
 	connfd = accept( sock, (struct sockaddr *) &echoClntAddr, &cliAddrLen );
 
-	EchoString(connfd);
+	//EchoString(connfd);
+	PrintAndEchoStruct(connfd);
 	close(connfd);
 }
