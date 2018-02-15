@@ -5,7 +5,7 @@
 #include        <sys/types.h>
 #include        <string.h>
 #include        <unistd.h>
-#include "dataStructs.h"
+#include "../src/dataStructs.h"
 
 #define ECHOMAX 255             /* Longest string to echo */
 #define BACKLOG 128
@@ -17,25 +17,7 @@ DieWithError(const char *errorMessage) /* External error handling function */
         exit(1);
 }
 
-void
-str_cli(FILE *fp, int sockfd)
-{
-	ssize_t n;
-        char    sendline[ECHOMAX], recvline[ECHOMAX];
-
-        while (fgets(sendline, ECHOMAX, fp) != NULL) {
-
-                write(sockfd, sendline, strlen(sendline));
-
-                if ( (n = read(sockfd, recvline, ECHOMAX)) == 0)
-                        DieWithError("str_cli: server terminated prematurely");
-
-		recvline[ n ] = '\0';
-                fputs(recvline, stdout);
-        }
-}
-
-void sendStruct(FILE *fp, int sockfd)
+void sendStruct(int sockfd)
 {
 	int blockSize = sizeof(struct block);
 	struct block blockToSend;
@@ -75,8 +57,7 @@ main(int argc, char **argv)
 
 	connect(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr));
 
-	//str_cli(stdin, sockfd);		/* do it all */
-	sendStruct(stdin, sockfd);
+	sendStruct(sockfd);
 
 	exit(0);
 }

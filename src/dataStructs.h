@@ -15,27 +15,7 @@ struct block
 struct minerInfo
 {
 	char username[20];
-	struct sockaddr_in ipAddress;
-	unsigned short portNumber;
-};
-
-// A miner's info about itself
-// Just for planning. Will probably be moved into the program itself
-struct selfInfo
-{
-	int identifier; // 0-9
-	char username[20];
-	struct sockaddr_in ipAddress;
-	unsigned short portNumber;
-	int vectorClock[10];
-
-	// The blockchain. Max 200 entries, can increase if needed.
-	// First entry's data is provided by server
-	struct block blockchain[200];
-	
-	// The other miner's data. username/ip/port
-	// This will all be maintained and sent by the server
-	struct minerInfo peers[10];
+	struct sockaddr_in address;
 };
 
 // The struct used to respond to a server query

@@ -5,9 +5,8 @@
 #include	<sys/types.h>
 #include	<string.h>
 #include	<unistd.h>
-#include "dataStructs.h"
+#include "../src/dataStructs.h"
 
-#define	ECHOMAX	255		/* Longest string to echo */
 #define BACKLOG	128
 
 void 
@@ -15,20 +14,6 @@ DieWithError(const char *errorMessage) /* External error handling function */
 {
 	perror(errorMessage);
 	exit(1);
-}
-
-void
-EchoString(int sockfd)
-{
-    ssize_t n;
-    char    line[ECHOMAX];
-
-    for ( ; ; ) {
-	    if ( (n = read(sockfd, line, ECHOMAX)) == 0 )
-   	    	return; /* connection closed by other end */
-
-        write(sockfd, line, n );
-    }
 }
 
 void PrintAndEchoStruct(int sockfd)
@@ -56,9 +41,7 @@ main(int argc, char **argv)
     struct sockaddr_in echoServAddr; /* Local address */
     struct sockaddr_in echoClntAddr; /* Client address */
     unsigned int cliAddrLen;         /* Length of incoming message */
-    char echoBuffer[sizeof(struct block)];        /* Buffer for echo string */
     unsigned short echoServPort;     /* Server port */
-    int recvMsgSize;                 /* Size of received message */
 
     if (argc != 2)         /* Test for correct number of parameters */
     {
@@ -88,7 +71,6 @@ main(int argc, char **argv)
 	cliAddrLen = sizeof(echoClntAddr);
 	connfd = accept( sock, (struct sockaddr *) &echoClntAddr, &cliAddrLen );
 
-	//EchoString(connfd);
 	PrintAndEchoStruct(connfd);
 	close(connfd);
 }
