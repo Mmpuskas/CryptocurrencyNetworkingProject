@@ -34,22 +34,19 @@ EchoString(int sockfd)
 void PrintAndEchoStruct(int sockfd)
 {
 	int blockSize = sizeof(struct block);
-	char stringReceived[blockSize + 1];
-	struct block* blockReceived = (struct block*) &stringReceived;
+	struct block blockReceived;
 
 	ssize_t n;
-	if ( (n = read(sockfd, stringReceived, blockSize)) == 0 )
+	if ( (n = read(sockfd, &blockReceived, blockSize)) == 0 )
 		return; /* connection closed by other end */
 
 	// Send the data back across the connection
-	write(sockfd, stringReceived, n);
+	write(sockfd, &blockReceived, n);
 
 	printf("coinAmounts in block received from client: ");
 	for(int i = 0; i < 10; i++)
-		printf("%d ", blockReceived->coinAmounts[i]);
+		printf("%d ", blockReceived.coinAmounts[i]);
 	printf("\n");
-
-	fputs(stringReceived, stdout);
 }
 
 int

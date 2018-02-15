@@ -38,31 +38,23 @@ str_cli(FILE *fp, int sockfd)
 void sendStruct(FILE *fp, int sockfd)
 {
 	int blockSize = sizeof(struct block);
-	struct block* blockToSend = malloc(blockSize);
+	struct block blockToSend;
 	ssize_t n;
 
 	for(int i = 0; i < 10; i++)
-		blockToSend->coinAmounts[i] = i + 42;
+		blockToSend.coinAmounts[i] = i + 42;
 
-	// Copy the block into a char array to be sent through the socket
-	char bytesToSend[blockSize];
-	memcpy(bytesToSend, blockToSend, blockSize);
+	write(sockfd, &blockToSend, blockSize);
 
-	write(sockfd, bytesToSend, blockSize);
-
-	char stringReceived[blockSize];
-
-	if ( (n = read(sockfd, stringReceived, blockSize)) == 0)
+	struct block blockReceived;
+	if ( (n = read(sockfd, &blockReceived, blockSize)) == 0)
 		DieWithError("str_cli: server terminated prematurely");
 
-	struct block* blockReceived = (struct block*) &stringReceived;
 
 	printf("coinAmounts in block received from server: ");
 	for(int i = 0; i < 10; i++)
-		printf("%d ", blockReceived->coinAmounts[i]);
+		printf("%d ", blockReceived.coinAmounts[i]);
 	printf("\n");
-
-	free(blockToSend);
 }
 
 int
