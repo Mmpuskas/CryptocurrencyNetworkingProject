@@ -16,7 +16,7 @@ struct block initBlock(char fileBuffer[255])
 	int i = 0;
 	int j = 0;
 	int k = 0;
-
+	//hello there
 	char coinBuffer[5];
 	memset(coinBuffer, 0, 5);
 
