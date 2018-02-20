@@ -4,20 +4,23 @@
 #include <arpa/inet.h> /* For sockaddr_in and inet_ntoa() */
 
 /** This file is for writing the data structures for both the server and miners */
-
 struct block
 {
 	// The change in amounts for each peer, indexed by ther identifier
 	int coinAmounts[10];
 };
 
-// Used by other structs
+struct blockchain
+{
+	int length;
+	struct block blocks[200];
+};
+
 struct minerInfo
 {
 	int identifier;
 	char username[20];
 	struct sockaddr_in address;
-	int initialCoins;
 };
 
 // The struct used to respond to a server query

@@ -10,24 +10,87 @@
 
 #define BACKLOG 10
 
-void handleInput(int socketFDs[], int identifier, int numOfMiners)
+int establishConnections(struct minerInfo* selfInfo, struct minerInfo* peers, int* connectionFDs)
 {
-	while(1)
+	printf("\nEstablishing connections.\n");
+	
+	// For each miner in our list, establish a connection
+	unsigned int addrLen = sizeof(struct sockaddr_in);
+	for(int i = 0; i < 10; i++)
 	{
-		for(int i = 0; i < numOfMiners; i++)
+		// Skip ourselves
+		if(i == selfInfo->identifier || peers[i].identifier == -1)
+			continue;
+
+		// Setup the socket
+		printf("\nAttempting connection to: %d\n", htons(peers[i].address.sin_port));
+		connectionFDs[i] = socket(AF_INET, SOCK_STREAM, 0);
+
+		// Try to connect
+		int result = connect(connectionFDs[i], (struct sockaddr *) &(peers[i].address), addrLen);
+		if(result == -1)
+			printf("Errno = %s\n", strerror(errno));
+		else
 		{
-			// Skip over ourselves
-			if(i == identifier)
-				continue;
+			// On a successful connection, send your info
+			printf("Connection successful. Sending info.\n");
+			write(connectionFDs[i], selfInfo, sizeof(struct minerInfo));
+			printf("Info sent.\n");
 
-			char message[10] = "Hello ";
-			message[5] = identifier + '0';
-			write(socketFDs[i], message, 10);
-
-			char received[10];
-			read(socketFDs[i], &received, 10);
-			printf("%s\n", received);
+			// Wait for the blockchain response
+			printf("Waiting for blockchain response.\n");
+			struct blockchain tempBlockchain;
+			ssize_t n = read(connectionFDs[i], &tempBlockchain, sizeof(struct blockchain));
+			if(n > 0)
+			{
+				printf("Blockchain response received. First block: [");
+				for(int i = 0; i < 10; i++)
+					printf("%d, ", tempBlockchain.blocks[0].coinAmounts[i]);
+				printf("]\n");
+			}
+			else
+				printf("Error in receiving blockchain response\n");
 		}
+	}
+
+
+	return 1;
+}
+
+int connectToClient(int* socketFD, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs)
+{
+	printf("\nNew connection found. Attempting to connect.\n");
+	unsigned int addrLen = sizeof(struct sockaddr_in);
+	struct sockaddr_in connectedAddress;
+
+	// Accept the connection
+	int tempFD = accept(*socketFD, (struct sockaddr *) &connectedAddress, &addrLen);
+	char clientName[20];
+	printf("Connected to: %s:%d\n", inet_ntop(AF_INET, &connectedAddress.sin_addr, clientName, sizeof(clientName)), htons(connectedAddress.sin_port));
+	
+	// Read the new client's data
+	struct minerInfo newClient;
+	ssize_t n = read(tempFD, &newClient, sizeof(struct minerInfo));
+
+	if(n > 0)
+	{
+		// Save the new client's info
+		connectionFDs[newClient.identifier] = tempFD;
+		peers[newClient.identifier] = newClient;
+		printf("Information received. Identifier = %d, username = %s\n"
+				,newClient.identifier, newClient.username);
+
+		// Send back our blockchain
+		printf("Sending blockchain response\n");
+		write(connectionFDs[newClient.identifier], currentChain, sizeof(struct blockchain));
+		printf("Blockchain response sent.\n");
+
+		return 0;
+	}
+	else
+	{
+		printf("Error receiving info from new client.\n");
+		return -1;
 	}
 }
 
@@ -35,6 +98,42 @@ void DieWithError(const char *errorMessage)
 {
 	perror(errorMessage);
 	exit(1);
+}
+
+struct block initBlock(char fileBuffer[255])
+{
+	struct block returnBlock;
+	for(int i = 0; i < 10; i++)
+		returnBlock.coinAmounts[i] = 0;
+
+	int i = 0;
+	int j = 0;
+	int k = 0;
+
+	char coinBuffer[5];
+	memset(coinBuffer, 0, 5);
+
+	// While we have more numbers
+	while(fileBuffer[i] != '\n')
+	{
+		// If we've hit the end of a number
+		if(fileBuffer[i] == ' ')
+		{
+			// Add the number to the coinAmounts
+			coinBuffer[j] = '\0';
+			returnBlock.coinAmounts[k] = atoi(coinBuffer);
+			k++;
+			memset(coinBuffer, 0, 5);
+			j = 0;
+		}
+
+		coinBuffer[j] = fileBuffer[i];
+
+		i++;
+		j++;
+	}
+
+	return returnBlock;
 }
 
 struct minerQuery initPeers(char fileBuffer[255])
@@ -130,10 +229,8 @@ int main(int argc, char **argv)
 
     // The blockchain. Max 200 entries, can increase if needed.
     // First entry's data is provided by server
-	int chainSize = 200;
-    struct block blockchain[chainSize];
-	for(int i = 0; i < chainSize; i++)
-		blockchain[0].coinAmounts[i] = 0;
+	struct blockchain currentChain;
+	currentChain.length = 0;
   
     // Username/ip/port
 	int numOfMiners = 0;
@@ -170,8 +267,7 @@ int main(int argc, char **argv)
 		selfInfo.address.sin_port = htons(atoi(fileBuffer));
 		// Fill the first block
 		fgets(fileBuffer, 100, initializerFP);
-		selfInfo.initialCoins = atoi(fileBuffer);
-		printf("InitCoins = %d\n", selfInfo.initialCoins);
+		currentChain.blocks[0] = initBlock(fileBuffer);
 		// Fill the peers
 		fgets(fileBuffer, 100, initializerFP);
 		struct minerQuery tempQuery = initPeers(fileBuffer);
@@ -211,41 +307,11 @@ int main(int argc, char **argv)
 
 	/* Start establishing connections */
 	//### select() example code taken from https://stackoverflow.com/questions/2284428/in-c-networking-using-select-do-i-first-have-to-listen-and-accept ###
-	printf("Establishing connections.\n");
-
-	// For each miner in our list, establish a connection
-	for(int i = 0; i < 10; i++)
-	{
-		// Skip ourselves
-		if(i == selfInfo.identifier || peers[i].identifier == -1)
-			continue;
-
-		// Setup the socket
-		printf("Attempting connection to: %d\n", htons(peers[i].address.sin_port));
-		connectionFDs[i] = socket(AF_INET, SOCK_STREAM, 0);
-
-		int result = connect(connectionFDs[i], (struct sockaddr *) &(peers[i].address), addrLen);
-		if(result == -1)
-			printf("Errno = %s\n", strerror(errno));
-		else
-		{
-			//On a successful connection, send your info
-			printf("Connection successful. Sending info.\n");
-			write(connectionFDs[i], &selfInfo, sizeof(struct minerInfo));
-			printf("Info sent.\n");
-			printf("Waiting for blockchain response.\n");
-			struct block tempBlockchain[200];
-			ssize_t n = read(connectionFDs[i], &tempBlockchain, sizeof(struct block) * 200);
-			if(n > 0)
-				printf("Blockchain response received.\n");
-			else
-				printf("Error in receiving blockchain response\n");
-		}
-	}
+	establishConnections(&selfInfo, peers, connectionFDs);
 
 	/* Start listening for user input, more connections, and transactions  */
-	printf("Listening for input, connections, and transactions...\n");
 
+	printf("Listening for input, connections, and transactions...\n");
 	int running = 1;
 	while(running)
 	{
@@ -269,32 +335,9 @@ int main(int argc, char **argv)
 			// Something can be read
 			if(FD_ISSET(socketFD, &fdSet))
 			{
-				// Found a listener
-				printf("New connection found. Attempting to connect.\n");
-				struct sockaddr_in connectedAddress;
-				int tempFD = accept(socketFD, (struct sockaddr *) &connectedAddress, &addrLen);
-				char clientName[20];
-				printf("Connected to: %s:%d\n", inet_ntop(AF_INET, &connectedAddress.sin_addr, clientName, sizeof(clientName)), htons(connectedAddress.sin_port));
-				
-				// Read the new client's data and put it in the right slot in connectionFDs and peers
-				struct minerInfo newClient;
-				ssize_t n = read(tempFD, &newClient, sizeof(struct minerInfo));
-
-				if(n > 0)
-				{
-					connectionFDs[newClient.identifier] = tempFD;
-					peers[newClient.identifier] = newClient;
-					printf("Information received. Identifier = %d, username = %s\n"
-							,newClient.identifier, newClient.username);
-					printf("Sending blockchain response\n");
-					write(connectionFDs[newClient.identifier], &blockchain, sizeof(struct block) * 200);
-					printf("Blockchain response sent.\n");
-				}
-				else
-					printf("Error receiving info from new client.\n");
-
-				//TODO:have the server send back its blockchain
-				numOfMiners++;
+				// Found a listener, connect to them
+				if(connectToClient(&socketFD, &currentChain, peers, connectionFDs) == 0)
+					numOfMiners++;
 			}
 
 			for(int i = 0; i < 10; i++)
@@ -311,10 +354,15 @@ int main(int argc, char **argv)
 					{
 						// Endpoint died, remove it.
 						connectionFDs[i] = -1;
+						numOfMiners--;
+
+						printf("Removed %d: connection terminated\n", i);
 					}
-					stringReceived[n] = '\0';
-						
-					printf("New response: %s\n", stringReceived);
+					else
+					{
+						stringReceived[n] = '\0';
+						printf("New response len %zd: %s\n", n, stringReceived);
+					}
 				}
 			}
 		}
