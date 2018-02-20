@@ -233,6 +233,13 @@ int main(int argc, char **argv)
 			printf("Connection successful. Sending info.\n");
 			write(connectionFDs[i], &selfInfo, sizeof(struct minerInfo));
 			printf("Info sent.\n");
+			printf("Waiting for blockchain response.\n");
+			struct block tempBlockchain[200];
+			ssize_t n = read(connectionFDs[i], &tempBlockchain, sizeof(struct block) * 200);
+			if(n > 0)
+				printf("Blockchain response received.\n");
+			else
+				printf("Error in receiving blockchain response\n");
 		}
 	}
 
@@ -279,6 +286,9 @@ int main(int argc, char **argv)
 					peers[newClient.identifier] = newClient;
 					printf("Information received. Identifier = %d, username = %s\n"
 							,newClient.identifier, newClient.username);
+					printf("Sending blockchain response\n");
+					write(connectionFDs[newClient.identifier], &blockchain, sizeof(struct block) * 200);
+					printf("Blockchain response sent.\n");
 				}
 				else
 					printf("Error receiving info from new client.\n");
