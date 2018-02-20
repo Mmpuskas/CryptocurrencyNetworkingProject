@@ -14,8 +14,10 @@ struct block
 // Used by other structs
 struct minerInfo
 {
+	int identifier;
 	char username[20];
 	struct sockaddr_in address;
+	int initialCoins;
 };
 
 // The struct used to respond to a server query

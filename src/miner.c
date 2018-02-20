@@ -37,42 +37,6 @@ void DieWithError(const char *errorMessage)
 	exit(1);
 }
 
-struct block initBlock(char fileBuffer[255])
-{
-	struct block returnBlock;
-	for(int i = 0; i < 10; i++)
-		returnBlock.coinAmounts[i] = 0;
-
-	int i = 0;
-	int j = 0;
-	int k = 0;
-
-	char coinBuffer[5];
-	memset(coinBuffer, 0, 5);
-
-	// While we have more numbers
-	while(fileBuffer[i] != '\n')
-	{
-		// If we've hit the end of a number
-		if(fileBuffer[i] == ' ')
-		{
-			// Add the number to the coinAmounts
-			coinBuffer[j] = '\0';
-			returnBlock.coinAmounts[k] = atoi(coinBuffer);
-			k++;
-			memset(coinBuffer, 0, 5);
-			j = 0;
-		}
-
-		coinBuffer[j] = fileBuffer[i];
-
-		i++;
-		j++;
-	}
-
-	return returnBlock;
-}
-
 struct minerQuery initPeers(char fileBuffer[255])
 {
 	struct minerQuery peerQuery;
@@ -80,6 +44,10 @@ struct minerQuery initPeers(char fileBuffer[255])
 	int i = 0;
 	int j = 0;
 	int numOfMiners = 1;
+
+	// Init id's to -1
+	for(int i = 0; i < 10; i++)
+		peerQuery.minerInfos[i].identifier = -1;
 	
 	while(fileBuffer[i] != '\n')
 	{
@@ -130,6 +98,8 @@ struct minerQuery initPeers(char fileBuffer[255])
 		j = 0;
 
 		/* Save the data into peerQuery */
+		// Identifier
+		peerQuery.minerInfos[identifier].identifier = identifier;
 		// Username
 		strcpy(peerQuery.minerInfos[identifier].username, username);
 		// Address
@@ -138,7 +108,7 @@ struct minerQuery initPeers(char fileBuffer[255])
 		peerAddress.sin_family = AF_INET;
 		inet_pton(AF_INET, ipAddress, &peerAddress.sin_addr);
 		peerAddress.sin_port = htons(atoi(portNumber));
-		printf("%d\n", atoi(portNumber));
+		printf("Peer %d port = %d\n", identifier, htons(peerAddress.sin_port));
 		peerQuery.minerInfos[identifier].address = peerAddress;
 	}
 
@@ -153,16 +123,17 @@ int main(int argc, char **argv)
 	///////////////////////////////////////
 	// Data defining this miner
 	
-    int identifier; // 0-9
-    char username[20];
-    struct sockaddr_in localAddress;
+	struct minerInfo selfInfo;
     int vectorClock[10];
 	for(int i = 0; i < 10; i++)
 		vectorClock[i] = 0;
 
     // The blockchain. Max 200 entries, can increase if needed.
     // First entry's data is provided by server
-    struct block blockchain[200];
+	int chainSize = 200;
+    struct block blockchain[chainSize];
+	for(int i = 0; i < chainSize; i++)
+		blockchain[0].coinAmounts[i] = 0;
   
     // Username/ip/port
 	int numOfMiners = 0;
@@ -173,6 +144,7 @@ int main(int argc, char **argv)
 
 	/* Checking if we're reading dummy data from a file */
 	// If we're given an argument, treat it as a filename
+	unsigned int addrLen = sizeof(struct sockaddr_in);
 	if(argc == 4)
 	{
 		printf("Loading dummy data from given file...\n");
@@ -184,21 +156,22 @@ int main(int argc, char **argv)
 
 		// Get the identifier
 		fgets(fileBuffer, 100, initializerFP);
-		identifier = fileBuffer[0] - '0';
+		selfInfo.identifier = fileBuffer[0] - '0';
 		// Get the username
 		fgets(fileBuffer, 100, initializerFP);
-		strcpy(username, fileBuffer);
+		strcpy(selfInfo.username, fileBuffer);
 		// Get the IP
 		fgets(fileBuffer, 100, initializerFP);
-		bzero(&localAddress, sizeof(localAddress));
-		localAddress.sin_family = AF_INET;
-		inet_pton(AF_INET, fileBuffer, &localAddress.sin_addr);
+		bzero(&selfInfo.address, addrLen);
+		selfInfo.address.sin_family = AF_INET;
+		inet_pton(AF_INET, fileBuffer, &selfInfo.address.sin_addr);
 		// Get the port
 		fgets(fileBuffer, 100, initializerFP);
-		localAddress.sin_port = htons(atoi(fileBuffer));
+		selfInfo.address.sin_port = htons(atoi(fileBuffer));
 		// Fill the first block
 		fgets(fileBuffer, 100, initializerFP);
-		blockchain[0] = initBlock(fileBuffer);
+		selfInfo.initialCoins = atoi(fileBuffer);
+		printf("InitCoins = %d\n", selfInfo.initialCoins);
 		// Fill the peers
 		fgets(fileBuffer, 100, initializerFP);
 		struct minerQuery tempQuery = initPeers(fileBuffer);
@@ -207,7 +180,7 @@ int main(int argc, char **argv)
 			peers[i] = tempQuery.minerInfos[i];
 		
 		fclose(initializerFP);
-		printf("Data loaded. Port = %d\n", htons(localAddress.sin_port));
+		printf("Data loaded. Port = %d\n", htons(selfInfo.address.sin_port));
 	}
 	else if(argc != 3)
 	{
@@ -220,39 +193,46 @@ int main(int argc, char **argv)
 	fd_set fdSet;
 	struct timeval timeVal;
 	int socketFD;
-	int connectionFDs[10];
 	int max = 0;
 	int reuse = 1;
-	unsigned int addrLen = sizeof(struct sockaddr_in);
+
+	// Initialize FDs to invalid
+	int connectionFDs[10];
+	for(int i = 0; i < 10; i++)
+		connectionFDs[i] = -1;
 
 	if((socketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 		DieWithError("client: socket() failed");
 	setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(int));
-	if(bind(socketFD, (struct sockaddr *) &localAddress, addrLen) < 0)
-		DieWithError("client: socket() failed");
+	if(bind(socketFD, (struct sockaddr *) &selfInfo.address, addrLen) < 0)
+		DieWithError("client: bind() failed");
 	if(listen(socketFD, BACKLOG) < 0)
-		DieWithError("client: socket() failed");
+		DieWithError("client: listen() failed");
 
 	/* Start establishing connections */
+	//### select() example code taken from https://stackoverflow.com/questions/2284428/in-c-networking-using-select-do-i-first-have-to-listen-and-accept ###
 	printf("Establishing connections.\n");
 
 	// For each miner in our list, establish a connection
-	int numConnections = 0;
-	for(int i = 0; i < numOfMiners; i++)
+	for(int i = 0; i < 10; i++)
 	{
 		// Skip ourselves
-		if(i == identifier)
+		if(i == selfInfo.identifier || peers[i].identifier == -1)
 			continue;
 
+		// Setup the socket
 		printf("Attempting connection to: %d\n", htons(peers[i].address.sin_port));
 		connectionFDs[i] = socket(AF_INET, SOCK_STREAM, 0);
+
 		int result = connect(connectionFDs[i], (struct sockaddr *) &(peers[i].address), addrLen);
 		if(result == -1)
 			printf("Errno = %s\n", strerror(errno));
 		else
 		{
-			numConnections++;
-			printf("Connection successful\n");
+			//On a successful connection, send your info
+			printf("Connection successful. Sending info.\n");
+			write(connectionFDs[i], &selfInfo, sizeof(struct minerInfo));
+			printf("Info sent.\n");
 		}
 	}
 
@@ -268,7 +248,7 @@ int main(int argc, char **argv)
 			max = socketFD + 1;
 
 		// Add existing connections to the fdSet
-		for(int i = 0; i < numConnections; i++)
+		for(int i = 0; i < 10; i++)
 		{
 			FD_SET(connectionFDs[i], &fdSet);
 			if(connectionFDs[i] >= max) 
@@ -285,17 +265,46 @@ int main(int argc, char **argv)
 				// Found a listener
 				printf("New connection found. Attempting to connect.\n");
 				struct sockaddr_in connectedAddress;
-				connectionFDs[numConnections] = accept(socketFD, (struct sockaddr *) &connectedAddress, &addrLen);
-				printf("Connected to: %d\n", htons(connectedAddress.sin_port));
+				int tempFD = accept(socketFD, (struct sockaddr *) &connectedAddress, &addrLen);
+				char clientName[20];
+				printf("Connected to: %s:%d\n", inet_ntop(AF_INET, &connectedAddress.sin_addr, clientName, sizeof(clientName)), htons(connectedAddress.sin_port));
+				
+				// Read the new client's data and put it in the right slot in connectionFDs and peers
+				struct minerInfo newClient;
+				ssize_t n = read(tempFD, &newClient, sizeof(struct minerInfo));
 
-				numConnections++;
+				if(n > 0)
+				{
+					connectionFDs[newClient.identifier] = tempFD;
+					peers[newClient.identifier] = newClient;
+					printf("Information received. Identifier = %d, username = %s\n"
+							,newClient.identifier, newClient.username);
+				}
+				else
+					printf("Error receiving info from new client.\n");
+
+				//TODO:have the server send back its blockchain
+				numOfMiners++;
 			}
 
-			for(int i = 0; i < numConnections; i++)
+			for(int i = 0; i < 10; i++)
 			{
+				// Skip connections that have been invalidated
+				if(connectionFDs[i] == -1)
+					continue;
+
 				if(FD_ISSET(connectionFDs[i], &fdSet))
 				{
-					printf("Got data to handle\n");
+					char stringReceived[255];
+					ssize_t n = read(socketFD, &stringReceived, 255);
+					if(n < 1)
+					{
+						// Endpoint died, remove it.
+						connectionFDs[i] = -1;
+					}
+					stringReceived[n] = '\0';
+						
+					printf("New response: %s\n", stringReceived);
 				}
 			}
 		}
