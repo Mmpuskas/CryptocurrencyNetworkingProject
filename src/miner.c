@@ -5,7 +5,37 @@
 #include <sys/types.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include "dataStructs.h"
+
+#define BACKLOG 10
+
+void handleInput(int socketFDs[], int identifier, int numOfMiners)
+{
+	while(1)
+	{
+		for(int i = 0; i < numOfMiners; i++)
+		{
+			// Skip over ourselves
+			if(i == identifier)
+				continue;
+
+			char message[10] = "Hello ";
+			message[5] = identifier + '0';
+			write(socketFDs[i], message, 10);
+
+			char received[10];
+			read(socketFDs[i], &received, 10);
+			printf("%s\n", received);
+		}
+	}
+}
+
+void DieWithError(const char *errorMessage)
+{
+	perror(errorMessage);
+	exit(1);
+}
 
 struct block initBlock(char fileBuffer[255])
 {
@@ -49,9 +79,11 @@ struct minerQuery initPeers(char fileBuffer[255])
 
 	int i = 0;
 	int j = 0;
+	int numOfMiners = 1;
 	
 	while(fileBuffer[i] != '\n')
 	{
+		numOfMiners++;
 		int identifier = -1;
 		char username[20];
 		char ipAddress[20];
@@ -110,6 +142,8 @@ struct minerQuery initPeers(char fileBuffer[255])
 		peerQuery.minerInfos[identifier].address = peerAddress;
 	}
 
+	peerQuery.numOfMiners = numOfMiners;
+
 	return peerQuery;
 }
 
@@ -131,7 +165,6 @@ int main(int argc, char **argv)
     struct block blockchain[200];
   
     // Username/ip/port
-    // Rest is sent by the server
 	int numOfMiners = 0;
     struct minerInfo peers[10];
 
@@ -140,12 +173,12 @@ int main(int argc, char **argv)
 
 	/* Checking if we're reading dummy data from a file */
 	// If we're given an argument, treat it as a filename
-	if(argc == 2)
+	if(argc == 4)
 	{
 		printf("Loading dummy data from given file...\n");
 		// Open the file
 		FILE *initializerFP;
-		initializerFP = fopen(argv[1], "r");
+		initializerFP = fopen(argv[3], "r");
 
 		char fileBuffer[255];
 
@@ -172,13 +205,99 @@ int main(int argc, char **argv)
 		numOfMiners = tempQuery.numOfMiners;
 		for(int i = 0; i < 10; i++)
 			peers[i] = tempQuery.minerInfos[i];
-		int peerIndex = 1;
-		printf("name: %s, port: %d\n", peers[peerIndex].username, htons(peers[peerIndex].address.sin_port));
 		
-		printf("Data loaded.\n");
+		fclose(initializerFP);
+		printf("Data loaded. Port = %d\n", htons(localAddress.sin_port));
 	}
-	else if(argc > 1)
+	else if(argc != 3)
 	{
+		printf("Unknown number of arguments\n");
 		exit(1);
+	}
+
+	/* Set up the socket */
+	printf("Setting up socket for listening.\n");
+	fd_set fdSet;
+	struct timeval timeVal;
+	int socketFD;
+	int connectionFDs[10];
+	int max = 0;
+	int reuse = 1;
+	unsigned int addrLen = sizeof(struct sockaddr_in);
+
+	if((socketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+		DieWithError("client: socket() failed");
+	setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(int));
+	if(bind(socketFD, (struct sockaddr *) &localAddress, addrLen) < 0)
+		DieWithError("client: socket() failed");
+	if(listen(socketFD, BACKLOG) < 0)
+		DieWithError("client: socket() failed");
+
+	/* Start establishing connections */
+	printf("Establishing connections.\n");
+
+	// For each miner in our list, establish a connection
+	int numConnections = 0;
+	for(int i = 0; i < numOfMiners; i++)
+	{
+		// Skip ourselves
+		if(i == identifier)
+			continue;
+
+		printf("Attempting connection to: %d\n", htons(peers[i].address.sin_port));
+		connectionFDs[i] = socket(AF_INET, SOCK_STREAM, 0);
+		int result = connect(connectionFDs[i], (struct sockaddr *) &(peers[i].address), addrLen);
+		if(result == -1)
+			printf("Errno = %s\n", strerror(errno));
+		else
+		{
+			numConnections++;
+			printf("Connection successful\n");
+		}
+	}
+
+	/* Start listening for user input, more connections, and transactions  */
+	printf("Listening for input, connections, and transactions...\n");
+
+	int running = 1;
+	while(running)
+	{
+		FD_ZERO(&fdSet);
+		FD_SET(socketFD, &fdSet);
+		if(socketFD >= max) 
+			max = socketFD + 1;
+
+		// Add existing connections to the fdSet
+		for(int i = 0; i < numConnections; i++)
+		{
+			FD_SET(connectionFDs[i], &fdSet);
+			if(connectionFDs[i] >= max) 
+				max = connectionFDs[i] + 1;
+		}
+
+		// Check for readable connections
+		timeVal.tv_sec = 1; timeVal.tv_usec = 0;
+		if(select(max, &fdSet, NULL, NULL, &timeVal) > 0)
+		{
+			// Something can be read
+			if(FD_ISSET(socketFD, &fdSet))
+			{
+				// Found a listener
+				printf("New connection found. Attempting to connect.\n");
+				struct sockaddr_in connectedAddress;
+				connectionFDs[numConnections] = accept(socketFD, (struct sockaddr *) &connectedAddress, &addrLen);
+				printf("Connected to: %d\n", htons(connectedAddress.sin_port));
+
+				numConnections++;
+			}
+
+			for(int i = 0; i < numConnections; i++)
+			{
+				if(FD_ISSET(connectionFDs[i], &fdSet))
+				{
+					printf("Got data to handle\n");
+				}
+			}
+		}
 	}
 }
