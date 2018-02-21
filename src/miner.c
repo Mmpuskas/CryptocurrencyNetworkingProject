@@ -9,8 +9,27 @@
 #include "dataStructs.h"
 
 #define BACKLOG 10
+#define BLOCKCHAINLENGTH 200
 
-int establishConnections(struct minerInfo* selfInfo, struct minerInfo* peers, int* connectionFDs)
+// Returns 0 if no value in One is less that the parallel value in Two, 1 if change
+int compareVectorClocks(int* clockOne, int* clockTwo)
+{
+	int returnVal = 0;
+	for(int i = 0; i < 10; i++)
+		if(clockOne[i] < clockTwo[i])
+			returnVal = 1;
+
+	return returnVal;
+}
+
+void updateClock(int* vectorClock, int* timestamp)
+{
+	for(int i = 0; i < 10; i++)
+		if(vectorClock[i] < timestamp[i])
+			vectorClock[i] = timestamp[i];
+}
+
+int establishConnections(struct minerInfo* selfInfo, struct blockchain* currentChain, int* vectorClock, struct minerInfo* peers, int* connectionFDs)
 {
 	printf("\nEstablishing connections.\n");
 	
@@ -50,14 +69,36 @@ int establishConnections(struct minerInfo* selfInfo, struct minerInfo* peers, in
 			}
 			else
 				printf("Error in receiving blockchain response\n");
+
+			if(n > 0)
+			{
+				updateClock(vectorClock, tempBlockchain.timestamp);
+				vectorClock[selfInfo->identifier]++;
+				printf("Timestamp received. Updated vectorClock [");
+				for(int i = 0; i < 10; i++)
+					printf("%d, ", vectorClock[i]);
+				printf("]\n");
+			}
+			else
+				printf("Error in receiving blockchain timestamp\n");
+
+			// Replace our blockchain with the response if necessary
+			int bClockChanged = 0;
+			compareVectorClocks(currentChain->timestamp, tempBlockchain.timestamp);
+			if(tempBlockchain.length > currentChain->length || bClockChanged == 1)
+			{
+				printf("Found longer blockchain or later clock. Replacing blockchain.\n");
+				for(int i = 0; i < BLOCKCHAINLENGTH; i++)
+					currentChain->blocks[i] = tempBlockchain.blocks[i];
+				currentChain->length = tempBlockchain.length;
+			}
 		}
 	}
-
 
 	return 1;
 }
 
-int connectToClient(int* socketFD, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs)
+int connectToClient(int* socketFD, struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs)
 {
 	printf("\nNew connection found. Attempting to connect.\n");
 	unsigned int addrLen = sizeof(struct sockaddr_in);
@@ -77,8 +118,17 @@ int connectToClient(int* socketFD, struct blockchain* currentChain, struct miner
 		// Save the new client's info
 		connectionFDs[newClient.identifier] = tempFD;
 		peers[newClient.identifier] = newClient;
-		printf("Information received. Identifier = %d, username = %s\n"
-				,newClient.identifier, newClient.username);
+
+		// Add new block with new miner's initial coins
+		currentChain->blocks[currentChain->length].coinAmounts[newClient.identifier] = newClient.initialCoins;
+		currentChain->length++;
+		printf("Information received. Identifier = %d, Username = %s, Coins = %d\n"
+				, newClient.identifier, newClient.username, newClient.initialCoins);
+
+		// Doing an event, update the clock
+		vectorClock[selfInfo->identifier]++;
+		for(int i = 0; i < 10; i++)
+			currentChain->timestamp[i] = vectorClock[i];
 
 		// Send back our blockchain
 		printf("Sending blockchain response\n");
@@ -268,6 +318,9 @@ int main(int argc, char **argv)
 		// Fill the first block
 		fgets(fileBuffer, 100, initializerFP);
 		currentChain.blocks[0] = initBlock(fileBuffer);
+		currentChain.length++;
+		// Set the initial coins
+		selfInfo.initialCoins = currentChain.blocks[0].coinAmounts[selfInfo.identifier];
 		// Fill the peers
 		fgets(fileBuffer, 100, initializerFP);
 		struct minerQuery tempQuery = initPeers(fileBuffer);
@@ -307,7 +360,7 @@ int main(int argc, char **argv)
 
 	/* Start establishing connections */
 	//### select() example code taken from https://stackoverflow.com/questions/2284428/in-c-networking-using-select-do-i-first-have-to-listen-and-accept ###
-	establishConnections(&selfInfo, peers, connectionFDs);
+	establishConnections(&selfInfo, &currentChain, vectorClock, peers, connectionFDs);
 
 	/* Start listening for user input, more connections, and transactions  */
 
@@ -336,8 +389,11 @@ int main(int argc, char **argv)
 			if(FD_ISSET(socketFD, &fdSet))
 			{
 				// Found a listener, connect to them
-				if(connectToClient(&socketFD, &currentChain, peers, connectionFDs) == 0)
+				vectorClock[selfInfo.identifier]++;
+				if(connectToClient(&socketFD, &selfInfo, vectorClock, &currentChain, peers, connectionFDs) == 0)
 					numOfMiners++;
+				else
+					vectorClock[selfInfo.identifier]--;
 			}
 
 			for(int i = 0; i < 10; i++)
