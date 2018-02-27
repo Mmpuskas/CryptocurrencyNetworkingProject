@@ -428,18 +428,74 @@ int main(int argc, char **argv)
 			// Something can be read from stdin
 			if(FD_ISSET(STDIN, &fdSet))
 			{
+				// Check what command we got
 				char inputBuffer[20];
 				read(STDIN, inputBuffer, 20);
 
 				// Turn the first non-printable character into a \0
 				for(int i = 0; i < 20; i++)
-					if(122 < inputBuffer[i] || inputBuffer[i] < 33)
+					if(122 < inputBuffer[i] || inputBuffer[i] < 32)
 						inputBuffer[i] = '\0';
 
-				if(strcmp(inputBuffer, "hi") == 0)
-					printf("Hello, michael\n");
+				// Check the format
+				if(inputBuffer[8] != ' ' || inputBuffer[10] != ' ')
+					printf("INPUT ERROR: Please format input as \"transfer x y\", where x is the peer identifier and y is the amount to transfer\n");
 				else
-					printf("%s\n", inputBuffer);
+				{
+					// Break off the command
+					char command[10];
+					int bufferIndex = 0;
+					while(inputBuffer[bufferIndex] != ' ')
+					{
+						command[bufferIndex] = inputBuffer[bufferIndex];
+						bufferIndex++;
+					}
+					command[bufferIndex] = '\0';
+
+					// Check for correctness
+					if(strcmp(command, "transfer") != 0)
+						printf("INPUT ERROR: Unknown command\n");
+					else
+					{
+						bufferIndex++; // Move past the space
+						// Break off the identifier
+						int inputIdentifier = inputBuffer[bufferIndex] - '0';
+						bufferIndex++;
+
+						if(3 < inputIdentifier || inputIdentifier < 0)
+							printf("INPUT ERROR: Identifier must be a number 0-3. Given input: %d\n", inputIdentifier);
+						else
+						{
+							// Break off the transaction amount
+							char transactionBuffer[10];
+							int transactionIndex = 0;
+							while(inputBuffer[bufferIndex] != '\0')
+							{
+								transactionBuffer[transactionIndex] = inputBuffer[bufferIndex];
+								bufferIndex++;
+								transactionIndex++;
+							}
+							transactionBuffer[transactionIndex] = '\0';
+							
+							char* endPtr;
+							int transactionAmount = strtol(transactionBuffer, &endPtr, 10);
+
+							// Test if error or actually 0
+							if(transactionAmount == 0)
+							{
+								if(errno == ERANGE)
+								{
+									printf("INPUT ERROR: Value out of range\n");
+									errno = 0;
+								}
+								if(endPtr == &inputBuffer[0] || endPtr != '\0')
+									printf("INPUT ERROR: Invalid value, integers only.\n");
+							}
+
+							printf("Transfer command received. Identifier = %d, Amount = %d\n", inputIdentifier, transactionAmount);
+						}
+					}
+				}
 			}
 		}
 	}
