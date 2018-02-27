@@ -52,6 +52,7 @@ int establishConnections(struct minerInfo* selfInfo, struct blockchain* currentC
 		else
 		{
 			// On a successful connection, send your info
+			vectorClock[selfInfo->identifier]++; // Event successful
 			printf("Connection successful. Sending info.\n");
 			write(connectionFDs[i], selfInfo, sizeof(struct minerInfo));
 			printf("Info sent.\n");
@@ -62,9 +63,9 @@ int establishConnections(struct minerInfo* selfInfo, struct blockchain* currentC
 			ssize_t n = read(connectionFDs[i], &tempBlockchain, sizeof(struct blockchain));
 			if(n > 0)
 			{
-				printf("Blockchain response received. First block: [");
+				printf("Blockchain response received. Newest block: [");
 				for(int i = 0; i < 10; i++)
-					printf("%d, ", tempBlockchain.blocks[0].coinAmounts[i]);
+					printf("%d, ", tempBlockchain.blocks[tempBlockchain.length - 1].coinAmounts[i]);
 				printf("]\n");
 			}
 			else
@@ -108,6 +109,7 @@ int connectToClient(int* socketFD, struct minerInfo* selfInfo, int* vectorClock,
 	int tempFD = accept(*socketFD, (struct sockaddr *) &connectedAddress, &addrLen);
 	char clientName[20];
 	printf("Connected to: %s:%d\n", inet_ntop(AF_INET, &connectedAddress.sin_addr, clientName, sizeof(clientName)), htons(connectedAddress.sin_port));
+	vectorClock[selfInfo->identifier]++; // Event successful
 	
 	// Read the new client's data
 	struct minerInfo newClient;
@@ -389,7 +391,6 @@ int main(int argc, char **argv)
 			if(FD_ISSET(socketFD, &fdSet))
 			{
 				// Found a listener, connect to them
-				vectorClock[selfInfo.identifier]++;
 				if(connectToClient(&socketFD, &selfInfo, vectorClock, &currentChain, peers, connectionFDs) == 0)
 					numOfMiners++;
 				else
