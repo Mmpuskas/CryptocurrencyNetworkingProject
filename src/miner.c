@@ -10,6 +10,7 @@
 
 #define BACKLOG 10
 #define BLOCKCHAINLENGTH 200
+#define STDIN 0
 
 // Returns 0 if no value in One is less that the parallel value in Two, 1 if change
 int compareVectorClocks(int* clockOne, int* clockTwo)
@@ -365,13 +366,13 @@ int main(int argc, char **argv)
 	establishConnections(&selfInfo, &currentChain, vectorClock, peers, connectionFDs);
 
 	/* Start listening for user input, more connections, and transactions  */
-
 	printf("Listening for input, connections, and transactions...\n");
 	int running = 1;
 	while(running)
 	{
 		FD_ZERO(&fdSet);
 		FD_SET(socketFD, &fdSet);
+		FD_SET(STDIN, &fdSet);
 		if(socketFD >= max) 
 			max = socketFD + 1;
 
@@ -387,7 +388,7 @@ int main(int argc, char **argv)
 		timeVal.tv_sec = 1; timeVal.tv_usec = 0;
 		if(select(max, &fdSet, NULL, NULL, &timeVal) > 0)
 		{
-			// Something can be read
+			// Something can be read from the socket
 			if(FD_ISSET(socketFD, &fdSet))
 			{
 				// Found a listener, connect to them
@@ -397,6 +398,7 @@ int main(int argc, char **argv)
 					vectorClock[selfInfo.identifier]--;
 			}
 
+			// Run through the connections in the socket to check for things to read
 			for(int i = 0; i < 10; i++)
 			{
 				// Skip connections that have been invalidated
@@ -418,9 +420,26 @@ int main(int argc, char **argv)
 					else
 					{
 						stringReceived[n] = '\0';
-						printf("New response len %zd: %s\n", n, stringReceived);
+						printf("New socket response len %zd: %s\n", n, stringReceived);
 					}
 				}
+			}
+
+			// Something can be read from stdin
+			if(FD_ISSET(STDIN, &fdSet))
+			{
+				char inputBuffer[20];
+				read(STDIN, inputBuffer, 20);
+
+				// Turn the first non-printable character into a \0
+				for(int i = 0; i < 20; i++)
+					if(122 < inputBuffer[i] || inputBuffer[i] < 33)
+						inputBuffer[i] = '\0';
+
+				if(strcmp(inputBuffer, "hi") == 0)
+					printf("Hello, michael\n");
+				else
+					printf("%s\n", inputBuffer);
 			}
 		}
 	}
