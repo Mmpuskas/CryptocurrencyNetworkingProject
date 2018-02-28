@@ -33,7 +33,7 @@ void broadcastTransaction(int receiverID, int amountToSend, struct minerInfo* se
 			transaction.timestamp[i] = vectorClock[i];
 
 		printf("Broadcasting transaction to %s (%d)\n", peers[i].username, i);
-		write(connectionFDs[i], waitingTransaction, sizeof(struct purchaseRequest));
+		write(connectionFDs[i], &transaction, sizeof(struct purchaseRequest));
 	}
 
 	// Add the transaction so we know to process it
@@ -376,7 +376,7 @@ struct minerQuery initPeers(char fileBuffer[255])
 		peerAddress.sin_family = AF_INET;
 		inet_pton(AF_INET, ipAddress, &peerAddress.sin_addr);
 		peerAddress.sin_port = htons(atoi(portNumber));
-		printf("Peer %d port = %d\n", identifier, htons(peerAddress.sin_port));
+		printf("Peer %s(%d) Address = %s:%d\n", username, identifier, ipAddress, htons(peerAddress.sin_port));
 		peerQuery.minerInfos[identifier].address = peerAddress;
 	}
 
@@ -427,6 +427,7 @@ int main(int argc, char **argv)
 		selfInfo.identifier = fileBuffer[0] - '0';
 		// Get the username
 		fgets(fileBuffer, 100, initializerFP);
+		fileBuffer[strcspn(fileBuffer, "\r\n")] = '\0';
 		strcpy(selfInfo.username, fileBuffer);
 		// Get the IP
 		fgets(fileBuffer, 100, initializerFP);
@@ -450,7 +451,7 @@ int main(int argc, char **argv)
 			peers[i] = tempQuery.minerInfos[i];
 		
 		fclose(initializerFP);
-		printf("Data loaded. Port = %d\n", htons(selfInfo.address.sin_port));
+		printf("Data loaded. Username = %s Port = %d\n", selfInfo.username, htons(selfInfo.address.sin_port));
 	}
 	else if(argc != 3)
 	{
@@ -525,21 +526,27 @@ int main(int argc, char **argv)
 
 				if(FD_ISSET(connectionFDs[i], &fdSet))
 				{
-					char stringReceived[255];
-					ssize_t n = read(socketFD, &stringReceived, 255);
+					struct purchaseRequest incomingTransaction;
+					ssize_t n = read(connectionFDs[i], &incomingTransaction, sizeof(struct purchaseRequest));
 					if(n < 1)
 					{
 						// Endpoint died, remove it.
 						connectionFDs[i] = -1;
 						numOfMiners--;
 
-						printf("Removed %d: connection terminated\n", i);
+						printf("Removed %d: connection terminated. Err = %s\n", i, strerror(errno));
 					}
 					else
 					{
-						stringReceived[n] = '\0';
-						printf("New socket response len %zd: %s\n", n, stringReceived);
-						//TODO: Write response to receiving a purchase request
+						printf("Received purchase request.\n");
+						if(waitingTransaction == NULL)
+						{
+							waitingTransaction = malloc(sizeof(struct block));
+							waitingTransaction->coinAmounts[incomingTransaction.spenderID] = -(incomingTransaction.amount);
+							waitingTransaction->coinAmounts[incomingTransaction.receiverID] = incomingTransaction.amount;
+						}
+						else
+							printf("ERROR: Received new transaction while an old transaction is waiting.\n");
 					}
 				}
 			}
@@ -553,8 +560,12 @@ int main(int argc, char **argv)
 			// Something is waiting to be computed
 			if(waitingTransaction != NULL)
 			{
+				printf("Processing purchase request.\n");
+
 				// Done processing, free waitingTransaction
+				printf("Done processing purchase request.\n");
 				free(waitingTransaction);
+				waitingTransaction = NULL;
 			}
 		}
 	}
