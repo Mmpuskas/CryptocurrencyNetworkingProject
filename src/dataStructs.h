@@ -36,11 +36,14 @@ struct minerQuery
 
 struct purchaseRequest
 {
-	// The miner being purchased from
-	int identifier;
+	// The miner spending money
+	int spenderID;
+
+	// The miner receiving money
+	int receiverID;
 
 	// The number of coins being spent
-	int numOfCoins;
+	int amount;
 
 	// The vector clock timestamp
 	int timestamp[10];

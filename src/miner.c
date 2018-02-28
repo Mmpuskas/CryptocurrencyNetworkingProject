@@ -12,7 +12,37 @@
 #define BLOCKCHAINLENGTH 200
 #define STDIN 0
 
-void parseTransfer()
+void broadcastTransaction(int receiverID, int amountToSend, struct minerInfo* selfInfo, int* vectorClock, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
+{
+	// For each miner in our list, write the transaction
+	for(int i = 0; i < 10; i++)
+	{
+		// Skip ourselves and removed peers
+		if(i == selfInfo->identifier || peers[i].identifier == -1)
+			continue;
+
+		// Build the transaction
+		struct purchaseRequest transaction;
+		transaction.receiverID = receiverID;
+		transaction.spenderID = selfInfo->identifier;
+		transaction.amount = amountToSend;
+
+		// Increment the vector clock and set the transaction's timestamp
+		vectorClock[selfInfo->identifier]++; // Event successful
+		for(int i = 0; i < 10; i++)
+			transaction.timestamp[i] = vectorClock[i];
+
+		printf("Broadcasting transaction to %s (%d)\n", peers[i].username, i);
+		write(connectionFDs[i], waitingTransaction, sizeof(struct purchaseRequest));
+	}
+
+	// Add the transaction so we know to process it
+	waitingTransaction = malloc(sizeof(struct block));
+	waitingTransaction->coinAmounts[selfInfo->identifier] = -amountToSend;
+	waitingTransaction->coinAmounts[receiverID] = amountToSend;
+}
+
+void parseTransfer(struct minerInfo* selfInfo, int* vectorClock, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
 {
 	// Check what command we got
 	char inputBuffer[20];
@@ -92,6 +122,7 @@ void parseTransfer()
 				}
 
 				printf("Transfer command received. Identifier = %d, Amount = %d\n", inputIdentifier, transactionAmount);
+				broadcastTransaction(inputIdentifier, transactionAmount, selfInfo, vectorClock, peers, connectionFDs, waitingTransaction);
 			}
 		}
 	}
@@ -160,7 +191,7 @@ int establishConnections(struct minerInfo* selfInfo, struct blockchain* currentC
 			if(n > 0)
 			{
 				updateClock(vectorClock, tempBlockchain.timestamp);
-				vectorClock[selfInfo->identifier]++;
+				vectorClock[selfInfo->identifier]++; // Event successful
 				printf("Timestamp received. Updated vectorClock [");
 				for(int i = 0; i < 10; i++)
 					printf("%d, ", vectorClock[i]);
@@ -214,7 +245,7 @@ int connectToClient(int* socketFD, struct minerInfo* selfInfo, int* vectorClock,
 				, newClient.identifier, newClient.username, newClient.initialCoins);
 
 		// Doing an event, update the clock
-		vectorClock[selfInfo->identifier]++;
+		vectorClock[selfInfo->identifier]++; // Event Successful
 		for(int i = 0; i < 10; i++)
 			currentChain->timestamp[i] = vectorClock[i];
 
@@ -376,6 +407,8 @@ int main(int argc, char **argv)
 
 	// Data defining this miner
 	///////////////////////////////////////
+	
+	struct block* waitingTransaction = NULL;
 
 	/* Checking if we're reading dummy data from a file */
 	// If we're given an argument, treat it as a filename
@@ -506,6 +539,7 @@ int main(int argc, char **argv)
 					{
 						stringReceived[n] = '\0';
 						printf("New socket response len %zd: %s\n", n, stringReceived);
+						//TODO: Write response to receiving a purchase request
 					}
 				}
 			}
@@ -513,7 +547,14 @@ int main(int argc, char **argv)
 			// Something can be read from stdin
 			if(FD_ISSET(STDIN, &fdSet))
 			{
-				parseTransfer();
+				parseTransfer(&selfInfo, vectorClock, peers, connectionFDs, waitingTransaction);
+			}
+
+			// Something is waiting to be computed
+			if(waitingTransaction != NULL)
+			{
+				// Done processing, free waitingTransaction
+				free(waitingTransaction);
 			}
 		}
 	}
