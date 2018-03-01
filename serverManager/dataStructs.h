@@ -15,17 +15,24 @@ struct block
 struct minerInfo
 {
 	char username[20];
-	int ID;
-	int initialCoins;
 	struct sockaddr_in address;
-	bool active;
+	int active;
+	int initCoins;
+	int ID;
 };
 
 // The struct used to respond to a server query
-struct minerQuery
+struct minerList
 {
 	int numOfMiners;
 	struct minerInfo minerInfos[10];
+};
+
+struct managerReq
+{
+	int cmd;
+	struct minerInfo newMinerInfo;
+	int ID;
 };
 
 struct purchaseRequest
