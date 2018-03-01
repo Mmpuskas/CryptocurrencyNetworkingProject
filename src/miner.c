@@ -725,6 +725,15 @@ int main(int argc, char **argv)
 				}
 				currentChain.length++;
 
+				// Print the updated block
+				printf("Blockchain updated with new miner's info:\n\tblockID = %d block = [", currentChain.blocks[currentChain.length - 1].blockID);
+				for(int i = 0; i < 10; i++)
+					printf("%d, ", currentChain.blocks[currentChain.length - 1].coinAmounts[i]);
+				printf("]\n\ttimestamp = [");
+				for(int i = 0; i < 10; i++)
+					printf("%d, ", currentChain.blocks[currentChain.length - 1].timestamp[i]);
+				printf("]\n");
+
 				// Reset waitingTransaction and validationStep
 				free(waitingTransaction);
 				waitingTransaction = NULL;
