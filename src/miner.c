@@ -12,6 +12,25 @@
 #define BLOCKCHAINLENGTH 200
 #define STDIN 0
 
+// Example from https://stackoverflow.com/questions/5281779/c-how-to-test-easily-if-it-is-prime-number
+// Returns 0 if not prime, 1 if prime
+int isPrime(int num)
+{
+	if(num <= 1)
+		return 0;
+
+	if(num % 2 == 0 && num > 2)
+		return 0;
+
+	for(int i = 3; i < num / 2; i += 2)
+	{
+		if(num % i == 0)
+			return 0;
+	}
+
+	return 1;
+}
+
 void broadcastTransaction(struct minerInfo* selfInfo, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
 {
 	// For each miner in our list, write the transaction
@@ -686,11 +705,29 @@ int main(int argc, char **argv)
 			{
 				// Process the primes then increment validationStep
 				printf("Processing primes.\n");
+				int largeInt = rand() + 25000; // 25000 - 57767
+				int randIterations = rand() % 50;
+				for(int i = 0; i < randIterations; i++)
+					isPrime(largeInt);
+
+				printf("Done processing primes.\n");
+				validationStep = 2;
 			}
 			else if(validationStep == 2)
 			{
-				//TODO: When processing is done, add it to the blockchain and increment the length
-				printf("Primes done. Adding block to chain\n");
+				// Add the new block to the chain
+				printf("New block is validated. Adding block to chain\n");
+				currentChain.blocks[currentChain.length].blockID = waitingTransaction->blockID;
+				for(int i = 0; i < 10; i++)
+				{
+					currentChain.blocks[currentChain.length].coinAmounts[i] = waitingTransaction->coinAmounts[i];
+					currentChain.blocks[currentChain.length].timestamp[i] = waitingTransaction->timestamp[i];
+				}
+				currentChain.length++;
+
+				// Reset waitingTransaction and validationStep
+				free(waitingTransaction);
+				waitingTransaction = NULL;
 				validationStep = 0;
 			}
 
@@ -699,12 +736,16 @@ int main(int argc, char **argv)
 				printf("Transaction invalid. Old timestamp is newer than new timestamp. Nullifying transaction\n");
 				free(waitingTransaction);
 				waitingTransaction = NULL;
+				validationStep = 0;
+				invalidCode = 0;
 			}
 			else if(invalidCode == 2)
 			{
 				printf("Transaction invalid. Coins resulted in negative funds. Nullifying transaction\n");
 				free(waitingTransaction);
 				waitingTransaction = NULL;
+				validationStep = 0;
+				invalidCode = 0;
 			}
 		}
 	}
