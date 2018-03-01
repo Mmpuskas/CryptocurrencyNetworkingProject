@@ -10,12 +10,17 @@ struct block
 {
 	// The change in amounts for each peer, indexed by ther identifier
 	int coinAmounts[10];
+
+	// The unique identifier, starting at identifier*1000 and incrementing as more are generated
+	int blockID;
+
+	// The vector clock timestamp
+	int timestamp[10];
 };
 
 struct blockchain
 {
 	int length;
-	int timestamp[10];
 	struct block blocks[BLOCKCHAINLENGTH];
 };
 
@@ -32,19 +37,4 @@ struct minerQuery
 {
 	int numOfMiners;
 	struct minerInfo minerInfos[10];
-};
-
-struct purchaseRequest
-{
-	// The miner spending money
-	int spenderID;
-
-	// The miner receiving money
-	int receiverID;
-
-	// The number of coins being spent
-	int amount;
-
-	// The vector clock timestamp
-	int timestamp[10];
 };

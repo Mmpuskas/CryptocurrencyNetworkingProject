@@ -12,7 +12,7 @@
 #define BLOCKCHAINLENGTH 200
 #define STDIN 0
 
-void broadcastTransaction(int receiverID, int amountToSend, struct minerInfo* selfInfo, int* vectorClock, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
+void broadcastTransaction(struct minerInfo* selfInfo, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
 {
 	// For each miner in our list, write the transaction
 	for(int i = 0; i < 10; i++)
@@ -21,28 +21,13 @@ void broadcastTransaction(int receiverID, int amountToSend, struct minerInfo* se
 		if(i == selfInfo->identifier || peers[i].identifier == -1)
 			continue;
 
-		// Build the transaction
-		struct purchaseRequest transaction;
-		transaction.receiverID = receiverID;
-		transaction.spenderID = selfInfo->identifier;
-		transaction.amount = amountToSend;
-
-		// Increment the vector clock and set the transaction's timestamp
-		vectorClock[selfInfo->identifier]++; // Event successful
-		for(int i = 0; i < 10; i++)
-			transaction.timestamp[i] = vectorClock[i];
-
 		printf("Broadcasting transaction to %s (%d)\n", peers[i].username, i);
-		write(connectionFDs[i], &transaction, sizeof(struct purchaseRequest));
+		write(connectionFDs[i], waitingTransaction, sizeof(struct block));
 	}
 
-	// Add the transaction so we know to process it
-	waitingTransaction = malloc(sizeof(struct block));
-	waitingTransaction->coinAmounts[selfInfo->identifier] = -amountToSend;
-	waitingTransaction->coinAmounts[receiverID] = amountToSend;
 }
 
-void parseTransfer(struct minerInfo* selfInfo, int* vectorClock, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
+void parseTransfer(struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
 {
 	// Check what command we got
 	char inputBuffer[20];
@@ -122,7 +107,28 @@ void parseTransfer(struct minerInfo* selfInfo, int* vectorClock, struct minerInf
 				}
 
 				printf("Transfer command received. Identifier = %d, Amount = %d\n", inputIdentifier, transactionAmount);
-				broadcastTransaction(inputIdentifier, transactionAmount, selfInfo, vectorClock, peers, connectionFDs, waitingTransaction);
+
+				// Setup the transaction to be broadcast and processed
+				if(waitingTransaction == NULL)
+				{
+					waitingTransaction = malloc(sizeof(struct block));
+					for(int i = 0; i < 10; i++)
+					{
+						waitingTransaction->coinAmounts[i] = 0;
+						waitingTransaction->timestamp[i] = 0;
+					}
+					waitingTransaction->coinAmounts[inputIdentifier] = transactionAmount;
+					waitingTransaction->coinAmounts[selfInfo->identifier] = -transactionAmount;
+					waitingTransaction->blockID = (selfInfo->identifier * 1000) + currentChain->length;
+					// Increment the vector clock and set the transaction's timestamp
+					vectorClock[selfInfo->identifier]++; // Event successful
+					for(int i = 0; i < 10; i++)
+						waitingTransaction->timestamp[i] = vectorClock[i];
+
+					broadcastTransaction(selfInfo, peers, connectionFDs, waitingTransaction);
+				}
+				else
+					printf("ERROR: Can't send transaction while still processing one.\n");
 			}
 		}
 	}
@@ -190,7 +196,7 @@ int establishConnections(struct minerInfo* selfInfo, struct blockchain* currentC
 
 			if(n > 0)
 			{
-				updateClock(vectorClock, tempBlockchain.timestamp);
+				updateClock(vectorClock, tempBlockchain.blocks[tempBlockchain.length - 1].timestamp);
 				vectorClock[selfInfo->identifier]++; // Event successful
 				printf("Timestamp received. Updated vectorClock [");
 				for(int i = 0; i < 10; i++)
@@ -202,7 +208,7 @@ int establishConnections(struct minerInfo* selfInfo, struct blockchain* currentC
 
 			// Replace our blockchain with the response if necessary
 			int bClockChanged = 0;
-			compareVectorClocks(currentChain->timestamp, tempBlockchain.timestamp);
+			compareVectorClocks(currentChain->blocks[currentChain->length - 1].timestamp, tempBlockchain.blocks[tempBlockchain.length - 1].timestamp);
 			if(tempBlockchain.length > currentChain->length || bClockChanged == 1)
 			{
 				printf("Found longer blockchain or later clock. Replacing blockchain.\n");
@@ -237,17 +243,27 @@ int connectToClient(int* socketFD, struct minerInfo* selfInfo, int* vectorClock,
 		// Save the new client's info
 		connectionFDs[newClient.identifier] = tempFD;
 		peers[newClient.identifier] = newClient;
-
-		// Add new block with new miner's initial coins
-		currentChain->blocks[currentChain->length].coinAmounts[newClient.identifier] = newClient.initialCoins;
-		currentChain->length++;
 		printf("Information received. Identifier = %d, Username = %s, Coins = %d\n"
 				, newClient.identifier, newClient.username, newClient.initialCoins);
 
 		// Doing an event, update the clock
 		vectorClock[selfInfo->identifier]++; // Event Successful
+
+		// Add new block with new miner's initial coins
+		currentChain->blocks[currentChain->length].coinAmounts[newClient.identifier] = newClient.initialCoins;
+		currentChain->blocks[currentChain->length].blockID = (selfInfo->identifier * 1000) + currentChain->length;
 		for(int i = 0; i < 10; i++)
-			currentChain->timestamp[i] = vectorClock[i];
+			currentChain->blocks[currentChain->length].timestamp[i] = vectorClock[i];
+		currentChain->length++;
+
+		// Print the updated block
+		printf("Blockchain updated with new miner's info:\n\tblockID = %d block = [", currentChain->blocks[currentChain->length - 1].blockID);
+		for(int i = 0; i < 10; i++)
+			printf("%d, ", currentChain->blocks[currentChain->length - 1].coinAmounts[i]);
+		printf("]\n\ttimestamp = [");
+		for(int i = 0; i < 10; i++)
+			printf("%d, ", currentChain->blocks[currentChain->length - 1].timestamp[i]);
+		printf("]\n");
 
 		// Send back our blockchain
 		printf("Sending blockchain response\n");
@@ -526,8 +542,8 @@ int main(int argc, char **argv)
 
 				if(FD_ISSET(connectionFDs[i], &fdSet))
 				{
-					struct purchaseRequest incomingTransaction;
-					ssize_t n = read(connectionFDs[i], &incomingTransaction, sizeof(struct purchaseRequest));
+					struct block incomingTransaction;
+					ssize_t n = read(connectionFDs[i], &incomingTransaction, sizeof(struct block));
 					if(n < 1)
 					{
 						// Endpoint died, remove it.
@@ -541,9 +557,27 @@ int main(int argc, char **argv)
 						printf("Received purchase request.\n");
 						if(waitingTransaction == NULL)
 						{
+							// Save the incoming transaction to be processed
 							waitingTransaction = malloc(sizeof(struct block));
-							waitingTransaction->coinAmounts[incomingTransaction.spenderID] = -(incomingTransaction.amount);
-							waitingTransaction->coinAmounts[incomingTransaction.receiverID] = incomingTransaction.amount;
+							for(int i = 0; i < 10; i++)
+							{
+								waitingTransaction->coinAmounts[i] = 0;
+								waitingTransaction->timestamp[i] = 0;
+							}
+							waitingTransaction->blockID = incomingTransaction.blockID;
+							for(int i = 0; i < 10; i++)
+								waitingTransaction->coinAmounts[i] = incomingTransaction.coinAmounts[i];
+							for(int i = 0; i < 10; i++)
+								waitingTransaction->timestamp[i] = incomingTransaction.timestamp[i];
+
+							// Print the received block
+							printf("Request is ready to be processed. Info:\n\tblockID = %d block = [", waitingTransaction->blockID);
+							for(int i = 0; i < 10; i++)
+								printf("%d, ", waitingTransaction->coinAmounts[i]);
+							printf("]\n\ttimestamp = [");
+							for(int i = 0; i < 10; i++)
+								printf("%d, ", waitingTransaction->timestamp[i]);
+							printf("]\n");
 						}
 						else
 							printf("ERROR: Received new transaction while an old transaction is waiting.\n");
@@ -554,13 +588,14 @@ int main(int argc, char **argv)
 			// Something can be read from stdin
 			if(FD_ISSET(STDIN, &fdSet))
 			{
-				parseTransfer(&selfInfo, vectorClock, peers, connectionFDs, waitingTransaction);
+				parseTransfer(&selfInfo, vectorClock, &currentChain, peers, connectionFDs, waitingTransaction);
 			}
 
 			// Something is waiting to be computed
 			if(waitingTransaction != NULL)
 			{
 				printf("Processing purchase request.\n");
+				//TODO: When processing is done, add it to the blockchain and increment the length
 
 				// Done processing, free waitingTransaction
 				printf("Done processing purchase request.\n");
