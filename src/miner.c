@@ -503,6 +503,7 @@ int main(int argc, char **argv)
 	/* Start listening for user input, more connections, and transactions  */
 	printf("Listening for input, connections, and transactions...\n");
 	int running = 1;
+	int validationStep = 0; // 0 = verify coins, 1 = verify timestamps
 	while(running)
 	{
 		FD_ZERO(&fdSet);
@@ -580,7 +581,9 @@ int main(int argc, char **argv)
 							printf("]\n");
 						}
 						else
-							printf("ERROR: Received new transaction while an old transaction is waiting.\n");
+						{
+							//TODO: Handle a proof of work received while processing a transaction
+						}
 					}
 				}
 			}
@@ -592,15 +595,100 @@ int main(int argc, char **argv)
 			}
 
 			// Something is waiting to be computed
+			int invalidCode = 0;
 			if(waitingTransaction != NULL)
 			{
 				printf("Processing purchase request.\n");
-				//TODO: When processing is done, add it to the blockchain and increment the length
 
-				// Done processing, free waitingTransaction
-				printf("Done processing purchase request.\n");
-				free(waitingTransaction);
-				waitingTransaction = NULL;
+				if(validationStep == 0) // Re-compute the blockchain
+				{
+					printf("Re-computing blockchain with new block to verify timestamps and coin amounts.\n");
+					// Get the starting totals
+					int coinTotals[10];
+					for(int i = 0; i < 10; i++)
+						coinTotals[i] = currentChain.blocks[0].coinAmounts[i];
+
+					for(int i = 0; i < (currentChain.length + 1); i++)
+					{
+						// If we're at the end, do the finishing up
+						if(i == currentChain.length)
+						{
+							// Check against the new block
+							for(int j = 0; j < 10; j++)
+							{
+								if(currentChain.blocks[i - 1].timestamp[j] > waitingTransaction->timestamp[j])
+								{
+									invalidCode = 1;
+									break;
+								}
+							}
+
+							// Add the coins from this iteration
+							for(int k = 0; k < 10; k++)
+								coinTotals[k] += waitingTransaction->coinAmounts[k];
+							// Check if the coin total is valid
+							for(int k = 0; k < 10; k++)
+							{
+								if(coinTotals[k] < 0)
+								{
+									invalidCode = 2;
+									break;
+								}
+							}
+
+							if(invalidCode == 0)
+								validationStep = 1;
+						}
+						else // Else not at the end, do normal processing
+						{
+							// Check against the next block
+							for(int j = 0; j < 10; j++)
+							{
+								if(currentChain.blocks[i].timestamp[j] > currentChain.blocks[i + 1].timestamp[j])
+								{
+									invalidCode = 1;
+									break;
+								}
+
+								// Add the coins from this iteration
+								for(int k = 0; k < 10; k++)
+									coinTotals[k] += currentChain.blocks[j].coinAmounts[k];
+								// Check if the coin total is valid
+								for(int k = 0; k < 10; k++)
+								{
+									if(coinTotals[k] < 0)
+									{
+										invalidCode = 2;
+										break;
+									}
+								}
+							}
+						}
+					}
+				}
+				else if(validationStep == 1)
+				{
+					// Process the primes then increment validationStep
+					printf("Timestamp and coin amounts valid. Processing primes.\n");
+				}
+				else if(validationStep == 2)
+				{
+					//TODO: When processing is done, add it to the blockchain and increment the length
+					printf("Primes done. Adding block to chain\n");
+				}
+
+				if(invalidCode == 1)
+				{
+					printf("Transaction invalid. Old timestamp is newer than new timestamp. Nullifying transaction\n");
+					free(waitingTransaction);
+					waitingTransaction = NULL;
+				}
+				else if(invalidCode == 2)
+				{
+					printf("Transaction invalid. Coins resulted in negative funds. Nullifying transaction\n");
+					free(waitingTransaction);
+					waitingTransaction = NULL;
+				}
 			}
 		}
 	}
