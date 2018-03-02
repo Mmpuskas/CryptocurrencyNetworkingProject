@@ -118,6 +118,14 @@ int isPrime(int num)
 	return 1;
 }
 
+void printClock(int* vectorClock)
+{
+	printf("Current clock: [");
+	for(int i = 0; i < 9; i++)
+		printf("%d, ", vectorClock[i]);
+	printf("%d]\n", vectorClock[9]);
+}
+
 void broadcastTransaction(struct minerInfo* selfInfo, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
 {
 	// For each miner in our list, write the transaction
@@ -133,110 +141,112 @@ void broadcastTransaction(struct minerInfo* selfInfo, struct minerInfo* peers, i
 
 }
 
-void parseTransfer(struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
+void parseTransfer(char inputBuffer[10], struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
 {
-	// Check what command we got
-	char inputBuffer[20];
-	read(STDIN, inputBuffer, 20);
+	int bufferIndex = 0;
+	// Break off the identifier
+	int inputIdentifier = inputBuffer[bufferIndex] - '0';
+	bufferIndex++;
 
-	// Turn the first non-printable character into a \0
-	for(int i = 0; i < 20; i++)
-		if(122 < inputBuffer[i] || inputBuffer[i] < 32)
-			inputBuffer[i] = '\0';
-
-	// Check the format
-	if(inputBuffer[8] != ' ' || inputBuffer[10] != ' ')
+	if(3 < inputIdentifier || inputIdentifier < 0)
 	{
-		printf("INPUT ERROR: Please format input as \"transfer x y\", where x is the peer identifier and y is the amount to transfer\n");
+		printf("INPUT ERROR: Identifier must be a number 0-3. Given input: %d\n", inputIdentifier);
 		return;
 	}
 	else
 	{
-		// Break off the command
-		char command[10];
-		int bufferIndex = 0;
-		while(inputBuffer[bufferIndex] != ' ')
+		// Break off the transaction amount
+		char transactionBuffer[10];
+		int transactionIndex = 0;
+		while(inputBuffer[bufferIndex] != '\0')
 		{
-			command[bufferIndex] = inputBuffer[bufferIndex];
+			transactionBuffer[transactionIndex] = inputBuffer[bufferIndex];
 			bufferIndex++;
+			transactionIndex++;
 		}
-		command[bufferIndex] = '\0';
+		transactionBuffer[transactionIndex] = '\0';
+		
+		char* endPtr;
+		int transactionAmount = strtol(transactionBuffer, &endPtr, 10);
 
-		// Check for correctness
-		if(strcmp(command, "transfer") != 0)
+		// Test if error or actually 0
+		if(transactionAmount == 0)
 		{
-			printf("INPUT ERROR: Unknown command\n");
-			return;
-		}
-		else
-		{
-			bufferIndex++; // Move past the space
-			// Break off the identifier
-			int inputIdentifier = inputBuffer[bufferIndex] - '0';
-			bufferIndex++;
-
-			if(3 < inputIdentifier || inputIdentifier < 0)
+			if(errno == ERANGE)
 			{
-				printf("INPUT ERROR: Identifier must be a number 0-3. Given input: %d\n", inputIdentifier);
+				printf("INPUT ERROR: Value out of range\n");
+				errno = 0;
 				return;
 			}
-			else
+			if(endPtr == &inputBuffer[0] || endPtr != '\0')
 			{
-				// Break off the transaction amount
-				char transactionBuffer[10];
-				int transactionIndex = 0;
-				while(inputBuffer[bufferIndex] != '\0')
-				{
-					transactionBuffer[transactionIndex] = inputBuffer[bufferIndex];
-					bufferIndex++;
-					transactionIndex++;
-				}
-				transactionBuffer[transactionIndex] = '\0';
-				
-				char* endPtr;
-				int transactionAmount = strtol(transactionBuffer, &endPtr, 10);
-
-				// Test if error or actually 0
-				if(transactionAmount == 0)
-				{
-					if(errno == ERANGE)
-					{
-						printf("INPUT ERROR: Value out of range\n");
-						errno = 0;
-						return;
-					}
-					if(endPtr == &inputBuffer[0] || endPtr != '\0')
-					{
-						printf("INPUT ERROR: Invalid value, integers only.\n");
-						return;
-					}
-				}
-
-				printf("Transfer command received. Identifier = %d, Amount = %d\n", inputIdentifier, transactionAmount);
-
-				// Setup the transaction to be broadcast and processed
-				if(waitingTransaction == NULL)
-				{
-					waitingTransaction = malloc(sizeof(struct block));
-					for(int i = 0; i < 10; i++)
-					{
-						waitingTransaction->coinAmounts[i] = 0;
-						waitingTransaction->timestamp[i] = 0;
-					}
-					waitingTransaction->coinAmounts[inputIdentifier] = transactionAmount;
-					waitingTransaction->coinAmounts[selfInfo->identifier] = -transactionAmount;
-					waitingTransaction->blockID = (selfInfo->identifier * 1000) + currentChain->length;
-					// Increment the vector clock and set the transaction's timestamp
-					vectorClock[selfInfo->identifier]++; // Event successful
-					for(int i = 0; i < 10; i++)
-						waitingTransaction->timestamp[i] = vectorClock[i];
-
-					broadcastTransaction(selfInfo, peers, connectionFDs, waitingTransaction);
-				}
-				else
-					printf("ERROR: Can't send transaction while still processing one.\n");
+				printf("INPUT ERROR: Invalid value, integers only.\n");
+				return;
 			}
 		}
+
+		printf("Transfer command received. Identifier = %d, Amount = %d\n", inputIdentifier, transactionAmount);
+
+		// Setup the transaction to be broadcast and processed
+		if(waitingTransaction == NULL)
+		{
+			waitingTransaction = malloc(sizeof(struct block));
+			for(int i = 0; i < 10; i++)
+			{
+				waitingTransaction->coinAmounts[i] = 0;
+				waitingTransaction->timestamp[i] = 0;
+			}
+			waitingTransaction->coinAmounts[inputIdentifier] = transactionAmount;
+			waitingTransaction->coinAmounts[selfInfo->identifier] = -transactionAmount;
+			waitingTransaction->blockID = (selfInfo->identifier * 1000) + currentChain->length;
+			// Increment the vector clock and set the transaction's timestamp
+			vectorClock[selfInfo->identifier]++; // Event successful
+			for(int i = 0; i < 10; i++)
+				waitingTransaction->timestamp[i] = vectorClock[i];
+
+			broadcastTransaction(selfInfo, peers, connectionFDs, waitingTransaction);
+		}
+		else
+			printf("ERROR: Can't send transaction while still processing one.\n");
+	}
+}
+
+void parseCommand(struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
+{
+	// Check what command we got
+	char inputBuffer[20];
+	fgets(inputBuffer, 20, stdin);
+	printf("Input = %s\n", inputBuffer);
+
+	// Break off the command
+	char command[10];
+	int bufferIndex = 0;
+	while(inputBuffer[bufferIndex] != ' ' && inputBuffer[bufferIndex] != '\n')
+	{
+		command[bufferIndex] = inputBuffer[bufferIndex];
+		bufferIndex++;
+	}
+	command[bufferIndex] = '\0';
+
+	// Call the appropriate command function
+	if(strcmp(command, "transfer") == 0)
+	{
+		// Get the rest of the command
+		bufferIndex++;
+		char restOfLine[10];
+		int len = strlen(&inputBuffer[bufferIndex]);
+		strncpy(restOfLine, &inputBuffer[bufferIndex], len);
+		restOfLine[len] = '\0';
+
+		parseTransfer(restOfLine, selfInfo, vectorClock, currentChain, peers, connectionFDs, waitingTransaction);
+	}
+	else if(strcmp(command, "clock") == 0)
+	{
+		printClock(vectorClock);
+	}
+	else
+	{
+		printf("INPUT ERROR: Unknown command\n");
 	}
 }
 
@@ -557,28 +567,28 @@ int main(int argc, char **argv)
 		char fileBuffer[255];
 
 		// Get the identifier
-		fgets(fileBuffer, 100, initializerFP);
+		fgets(fileBuffer, 255, initializerFP);
 		selfInfo.identifier = fileBuffer[0] - '0';
 		// Get the username
-		fgets(fileBuffer, 100, initializerFP);
+		fgets(fileBuffer, 255, initializerFP);
 		fileBuffer[strcspn(fileBuffer, "\r\n")] = '\0';
 		strcpy(selfInfo.username, fileBuffer);
 		// Get the IP
-		fgets(fileBuffer, 100, initializerFP);
+		fgets(fileBuffer, 255, initializerFP);
 		bzero(&selfInfo.address, addrLen);
 		selfInfo.address.sin_family = AF_INET;
 		inet_pton(AF_INET, fileBuffer, &selfInfo.address.sin_addr);
 		// Get the port
-		fgets(fileBuffer, 100, initializerFP);
+		fgets(fileBuffer, 255, initializerFP);
 		selfInfo.address.sin_port = htons(atoi(fileBuffer));
 		// Fill the first block
-		fgets(fileBuffer, 100, initializerFP);
+		fgets(fileBuffer, 255, initializerFP);
 		currentChain.blocks[0] = initBlock(fileBuffer);
 		currentChain.length++;
 		// Set the initial coins
 		selfInfo.initialCoins = currentChain.blocks[0].coinAmounts[selfInfo.identifier];
 		// Fill the peers
-		fgets(fileBuffer, 100, initializerFP);
+		fgets(fileBuffer, 255, initializerFP);
 		struct minerQuery tempQuery = initPeers(fileBuffer);
 		numOfMiners = tempQuery.numOfMiners;
 		for(int i = 0; i < 10; i++)
@@ -729,7 +739,7 @@ int main(int argc, char **argv)
 			// Something can be read from stdin
 			if(FD_ISSET(STDIN, &fdSet))
 			{
-				parseTransfer(&selfInfo, vectorClock, &currentChain, peers, connectionFDs, waitingTransaction);
+				parseCommand(&selfInfo, vectorClock, &currentChain, peers, connectionFDs, waitingTransaction);
 			}
 		}
 
