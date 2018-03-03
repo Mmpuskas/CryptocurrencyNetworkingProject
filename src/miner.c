@@ -578,9 +578,18 @@ int main(int argc, char **argv)
 		}
 	}
   
-    // Username/ip/port
 	int numOfMiners = 0;
     struct minerInfo peers[10];
+
+	// Socket info
+	fd_set fdSet;
+	struct timeval timeVal;
+	int socketFD;
+	int max = 0;
+	int reuse = 1;
+
+	int serverFD = socket(AF_INET, SOCK_STREAM, 0);
+	struct sockaddr_in serverAddress;
 
 	// Data defining this miner
 	///////////////////////////////////////
@@ -590,12 +599,12 @@ int main(int argc, char **argv)
 	/* Checking if we're reading dummy data from a file */
 	// If we're given an argument, treat it as a filename
 	unsigned int addrLen = sizeof(struct sockaddr_in);
-	if(argc == 4)
+	if(argc == 2)
 	{
 		printf("Loading dummy data from given file...\n");
 		// Open the file
 		FILE *initializerFP;
-		initializerFP = fopen(argv[3], "r");
+		initializerFP = fopen(argv[1], "r");
 
 		char fileBuffer[255];
 
@@ -630,25 +639,48 @@ int main(int argc, char **argv)
 		fclose(initializerFP);
 		printf("Data loaded. Username = %s Port = %d\n", selfInfo.username, htons(selfInfo.address.sin_port));
 	}
-	else if(argc != 3)
+	else if(argc == 7) // miner <Username> <Coins> <Self-IP> <Self-port> <Server-IP> <Server-port>
+	{
+		/** Setup self info */
+		// Username
+		strcpy(selfInfo.username, argv[1]);
+		// Coins
+		selfInfo.initialCoins = atoi(argv[2]);
+		// IP
+		bzero(&selfInfo.address, addrLen);
+		selfInfo.address.sin_family = AF_INET;
+		inet_pton(AF_INET, argv[3], &selfInfo.address.sin_addr);
+		// Port
+		selfInfo.address.sin_port = htons(atoi(argv[4]));
+		
+		// Setup the server info
+		bzero(&serverAddress, addrLen);
+		serverAddress.sin_family = AF_INET;
+		inet_pton(AF_INET, argv[5], &serverAddress.sin_addr);
+		serverAddress.sin_port = htons(atoi(argv[6]));
+		printf("Data loaded. Username = %s Coins = %d Port = %d\n", selfInfo.username, selfInfo.initialCoins, htons(selfInfo.address.sin_port));
+
+		printf("Connecting to server.\n");
+		connect(serverFD, (struct sockaddr *) &serverAddress, sizeof(serverAddress));
+		printf("Connection successful. Registering with server.\n");
+
+		// Register
+		// Query
+		// TODO: Fill first block, ID, and peers
+	}
+	else
 	{
 		printf("Unknown number of arguments\n");
 		exit(1);
 	}
-
-	/* Set up the socket */
-	printf("Setting up socket for listening.\n");
-	fd_set fdSet;
-	struct timeval timeVal;
-	int socketFD;
-	int max = 0;
-	int reuse = 1;
 
 	// Initialize FDs to invalid
 	int connectionFDs[10];
 	for(int i = 0; i < 10; i++)
 		connectionFDs[i] = -1;
 
+	/* Set up the socket */
+	printf("Setting up socket for listening.\n");
 	if((socketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 		DieWithError("client: socket() failed");
 	setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(int));
