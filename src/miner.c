@@ -6,11 +6,40 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <time.h>
 #include "dataStructs.h"
 
 #define BACKLOG 10
 #define BLOCKCHAINLENGTH 200
 #define STDIN 0
+
+int checkUniqueID(struct blockchain* currentChain, int ID)
+{
+	int isUnique = 1;
+	for(int i = 0; i < currentChain->length; i++)
+		if(currentChain->blocks[i].blockID == ID)
+			isUnique = 0;
+
+	return isUnique;
+}
+
+void broadcastProof(struct minerInfo* selfInfo, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
+{
+	struct blockMessage message;
+	message.type = 1;
+	message.messageBlock = *waitingTransaction;
+
+	// For each miner in our list, write the transaction
+	for(int i = 0; i < 10; i++)
+	{
+		// Skip ourselves and removed peers
+		if(i == selfInfo->identifier || peers[i].identifier == -1)
+			continue;
+
+		printf("Broadcasting proof to %s (%d)\n", peers[i].username, i);
+		write(connectionFDs[i], &message, sizeof(struct blockMessage));
+	}
+}
 
 void addBlock(struct blockchain* currentChain, struct block* waitingTransaction)
 {
@@ -128,6 +157,10 @@ void printClock(int* vectorClock)
 
 void broadcastTransaction(struct minerInfo* selfInfo, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
 {
+	struct blockMessage message;
+	message.type = 0;
+	message.messageBlock = *waitingTransaction;
+
 	// For each miner in our list, write the transaction
 	for(int i = 0; i < 10; i++)
 	{
@@ -136,9 +169,9 @@ void broadcastTransaction(struct minerInfo* selfInfo, struct minerInfo* peers, i
 			continue;
 
 		printf("Broadcasting transaction to %s (%d)\n", peers[i].username, i);
-		write(connectionFDs[i], waitingTransaction, sizeof(struct block));
-	}
 
+		write(connectionFDs[i], &message, sizeof(struct blockMessage));
+	}
 }
 
 void parseTransfer(char inputBuffer[10], struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs, struct block** waitingTransaction)
@@ -633,6 +666,7 @@ int main(int argc, char **argv)
 	int running = 1;
 	int validationStep = 0; // 0 = verify coins, 1 = verify timestamps
 	int largeInt = rand() + 25000; // 25000 - 57767
+	srand(time(NULL));
 	int randIterations = rand() % 50;
 	int primeIteration = 0;
 	while(running)
@@ -674,8 +708,8 @@ int main(int argc, char **argv)
 
 				if(FD_ISSET(connectionFDs[i], &fdSet))
 				{
-					struct block incomingTransaction;
-					ssize_t n = read(connectionFDs[i], &incomingTransaction, sizeof(struct block));
+					struct blockMessage incomingTransaction;
+					ssize_t n = read(connectionFDs[i], &incomingTransaction, sizeof(struct blockMessage));
 					if(n < 1)
 					{
 						// Endpoint died, remove it.
@@ -686,9 +720,9 @@ int main(int argc, char **argv)
 					}
 					else
 					{
-						printf("Received purchase request.\n");
-						if(waitingTransaction == NULL)
+						if(incomingTransaction.type == 0)
 						{
+							printf("Received purchase request.\n");
 							// Save the incoming transaction to be processed
 							waitingTransaction = malloc(sizeof(struct block));
 							for(int i = 0; i < 10; i++)
@@ -696,11 +730,11 @@ int main(int argc, char **argv)
 								waitingTransaction->coinAmounts[i] = 0;
 								waitingTransaction->timestamp[i] = 0;
 							}
-							waitingTransaction->blockID = incomingTransaction.blockID;
+							waitingTransaction->blockID = incomingTransaction.messageBlock.blockID;
 							for(int i = 0; i < 10; i++)
-								waitingTransaction->coinAmounts[i] = incomingTransaction.coinAmounts[i];
+								waitingTransaction->coinAmounts[i] = incomingTransaction.messageBlock.coinAmounts[i];
 							for(int i = 0; i < 10; i++)
-								waitingTransaction->timestamp[i] = incomingTransaction.timestamp[i];
+								waitingTransaction->timestamp[i] = incomingTransaction.messageBlock.timestamp[i];
 
 							// Update clock
 							vectorClock[selfInfo.identifier]++;
@@ -715,27 +749,37 @@ int main(int argc, char **argv)
 								printf("%d, ", waitingTransaction->timestamp[i]);
 							printf("]\n");
 						}
-						else
+						else if(incomingTransaction.type == 1)
 						{
 							printf("Received proof of work. Checking for validity.\n");
-							int invalidCode = validateBlock(&currentChain, waitingTransaction);
+							int invalidCode = validateBlock(&currentChain, &incomingTransaction.messageBlock);
 
 							if(invalidCode == 0)
 							{
-								printf("Received proof is valid. Adding to blockchain.\n");
-								addBlock(&currentChain, waitingTransaction);
-								validationStep = 0;
-								free(waitingTransaction);
-								waitingTransaction = NULL;
+								if(checkUniqueID(&currentChain, incomingTransaction.messageBlock.blockID))
+								{
+									printf("Received proof is valid. Adding to blockchain.\n");
+									addBlock(&currentChain, &incomingTransaction.messageBlock);
+									validationStep = 0;
+									primeIteration = 0;
+									free(waitingTransaction);
+									waitingTransaction = NULL;
+								}
+								else
+									invalidCode = 3;
 							}
 							else
 							{
 								if(invalidCode == 1)
 									printf("Received proof is invalid. Old timestamp is newer than new timestamp. Continuing with own processing.\n");
-								else
+								else if (invalidCode == 2)
 									printf("Received proof is invalid. Coins resulted in negative funds. Continuing with own processing.\n");
+								else
+									printf("Received proof is invalid. Duplicate ID. Continuing with own processing.\n");
 							}
 						}
+						else
+							printf("ERROR: Received message of unexpected format.\n");
 					}
 				}
 			}
@@ -744,10 +788,6 @@ int main(int argc, char **argv)
 			if(FD_ISSET(STDIN, &fdSet))
 			{
 				parseCommand(&selfInfo, vectorClock, &currentChain, peers, connectionFDs, &waitingTransaction);
-				if(waitingTransaction == NULL)
-					printf("WaitingTransaction = NULL\n");
-				else
-					printf("WaitingTransaction != NULL\n");
 			}
 		}
 
@@ -759,6 +799,7 @@ int main(int argc, char **argv)
 			{
 				printf("Re-computing blockchain with new block to verify timestamps and coin amounts.\n");
 				invalidCode = validateBlock(&currentChain, waitingTransaction);
+				randIterations = (rand() % 40) + 10;
 
 				// Done checking, ready for processing
 				if(invalidCode == 0)
@@ -785,7 +826,8 @@ int main(int argc, char **argv)
 			}
 			else if(validationStep == 2)
 			{
-				printf("New block is validated. Adding block to chain\n");
+				printf("New block is validated. Adding block to chain and broadcasting success.\n");
+				broadcastProof(&selfInfo, peers, connectionFDs, waitingTransaction);
 				addBlock(&currentChain, waitingTransaction);
 				validationStep = 0;
 

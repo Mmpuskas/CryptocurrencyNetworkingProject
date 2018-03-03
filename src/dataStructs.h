@@ -38,3 +38,11 @@ struct minerQuery
 	int numOfMiners;
 	struct minerInfo minerInfos[10];
 };
+
+struct blockMessage
+{
+	// 0 = request, 1 = proof
+	int type;
+
+	struct block messageBlock;
+};
