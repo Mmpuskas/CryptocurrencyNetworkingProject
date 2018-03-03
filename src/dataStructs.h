@@ -46,3 +46,31 @@ struct blockMessage
 
 	struct block messageBlock;
 };
+
+struct toServerMessage
+{
+	// 0 = query, 1 = register, 2 = deregister, 3 = save
+	int type;
+
+	// Full in register, only has username in deregister
+	struct minerInfo clientInfo;
+
+	// For save
+	char fileName[20];
+};
+
+struct fromServerMessage
+{
+	// 0 = query response (numMiners, peers), 1 = other (returnCode)
+	int type;
+
+	// For query
+	struct minerQuery peers;
+
+	// For register
+	int identifier;
+
+	// SUCCESS or FAILURE
+	// For register, deregister, save
+	char returnCode[8];
+};
