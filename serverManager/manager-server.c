@@ -11,7 +11,6 @@
 
 struct minerList ml;
 
-
 void
 DieWithError(const char *errorMessage) /* External error handling function */
 {

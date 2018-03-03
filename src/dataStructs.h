@@ -29,10 +29,7 @@ struct minerInfo
 	int identifier;
 	int initialCoins;
 	char username[20];
-	int ID;
-	int initialCoins;
 	struct sockaddr_in address;
-	bool active;
 };
 
 // The struct used to respond to a server query
