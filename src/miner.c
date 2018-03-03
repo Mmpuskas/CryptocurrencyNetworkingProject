@@ -24,7 +24,7 @@ void addBlock(struct blockchain* currentChain, struct block* waitingTransaction)
 	currentChain->length++;
 
 	// Print the updated block
-	printf("Blockchain updated with new transcation:\n\tblockID = %d\n\tblock = [", currentChain->blocks[currentChain->length - 1].blockID);
+	printf("Blockchain updated with new transaction:\n\tblockID = %d\n\tblock = [", currentChain->blocks[currentChain->length - 1].blockID);
 	for(int i = 0; i < 10; i++)
 		printf("%d, ", currentChain->blocks[currentChain->length - 1].coinAmounts[i]);
 	printf("]\n\ttimestamp = [");
@@ -46,14 +46,15 @@ int validateBlock(struct blockchain* currentChain, struct block* waitingTransact
 	for(int i = 1; i < currentChain->length; i++)
 	{
 		// Check the timestamp at this iteration
+		int isBigger = 0;
 		for(int j = 0; j < 10; j++)
+			if(currentChain->blocks[i - 1].timestamp[j] < currentChain->blocks[i].timestamp[j])
+				isBigger = 1;
+
+		if(!isBigger)
 		{
-			if(currentChain->blocks[i - 1].timestamp[j] > currentChain->blocks[i].timestamp[j])
-			{
-				printf("%d > %d\n", currentChain->blocks[i - 1].timestamp[j], currentChain->blocks[i].timestamp[j]);
 				invalidCode = 1;
 				break;
-			}
 		}
 
 		// Add the coins from this iteration
@@ -74,14 +75,13 @@ int validateBlock(struct blockchain* currentChain, struct block* waitingTransact
 	}
 
 	// Check against the new block
+	int isBigger = 0;
 	for(int i = 0; i < 10; i++)
-	{
-		if(currentChain->blocks[currentChain->length - 1].timestamp[i] > waitingTransaction->timestamp[i])
-		{
-			invalidCode = 1;
-			break;
-		}
-	}
+		if(currentChain->blocks[currentChain->length - 1].timestamp[i] < waitingTransaction->timestamp[i])
+			isBigger = 1;
+
+	if(!isBigger)
+		invalidCode = 1;
 
 	// Add the coins from the new block
 	for(int k = 0; k < 10; k++)
@@ -141,7 +141,7 @@ void broadcastTransaction(struct minerInfo* selfInfo, struct minerInfo* peers, i
 
 }
 
-void parseTransfer(char inputBuffer[10], struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
+void parseTransfer(char inputBuffer[10], struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs, struct block** waitingTransaction)
 {
 	int bufferIndex = 0;
 	// Break off the identifier
@@ -188,35 +188,34 @@ void parseTransfer(char inputBuffer[10], struct minerInfo* selfInfo, int* vector
 		printf("Transfer command received. Identifier = %d, Amount = %d\n", inputIdentifier, transactionAmount);
 
 		// Setup the transaction to be broadcast and processed
-		if(waitingTransaction == NULL)
+		if(*waitingTransaction == NULL)
 		{
-			waitingTransaction = malloc(sizeof(struct block));
+			*waitingTransaction = malloc(sizeof(struct block));
 			for(int i = 0; i < 10; i++)
 			{
-				waitingTransaction->coinAmounts[i] = 0;
-				waitingTransaction->timestamp[i] = 0;
+				(*waitingTransaction)->coinAmounts[i] = 0;
+				(*waitingTransaction)->timestamp[i] = 0;
 			}
-			waitingTransaction->coinAmounts[inputIdentifier] = transactionAmount;
-			waitingTransaction->coinAmounts[selfInfo->identifier] = -transactionAmount;
-			waitingTransaction->blockID = (selfInfo->identifier * 1000) + currentChain->length;
+			(*waitingTransaction)->coinAmounts[inputIdentifier] = transactionAmount;
+			(*waitingTransaction)->coinAmounts[selfInfo->identifier] = -transactionAmount;
+			(*waitingTransaction)->blockID = (selfInfo->identifier * 1000) + currentChain->length;
 			// Increment the vector clock and set the transaction's timestamp
 			vectorClock[selfInfo->identifier]++; // Event successful
 			for(int i = 0; i < 10; i++)
-				waitingTransaction->timestamp[i] = vectorClock[i];
+				(*waitingTransaction)->timestamp[i] = vectorClock[i];
 
-			broadcastTransaction(selfInfo, peers, connectionFDs, waitingTransaction);
+			broadcastTransaction(selfInfo, peers, connectionFDs, *waitingTransaction);
 		}
 		else
 			printf("ERROR: Can't send transaction while still processing one.\n");
 	}
 }
 
-void parseCommand(struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
+void parseCommand(struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs, struct block** waitingTransaction)
 {
 	// Check what command we got
 	char inputBuffer[20];
 	fgets(inputBuffer, 20, stdin);
-	printf("Input = %s\n", inputBuffer);
 
 	// Break off the command
 	char command[10];
@@ -364,6 +363,7 @@ int connectToClient(int* socketFD, struct minerInfo* selfInfo, int* vectorClock,
 
 		// Doing an event, update the clock
 		vectorClock[selfInfo->identifier]++; // Event Successful
+		vectorClock[newClient.identifier]++; // Sync client clock
 
 		// Add new block with new miner's initial coins
 		currentChain->blocks[currentChain->length].coinAmounts[newClient.identifier] = newClient.initialCoins;
@@ -702,6 +702,10 @@ int main(int argc, char **argv)
 							for(int i = 0; i < 10; i++)
 								waitingTransaction->timestamp[i] = incomingTransaction.timestamp[i];
 
+							// Update clock
+							vectorClock[selfInfo.identifier]++;
+							updateClock(vectorClock, waitingTransaction->timestamp);
+
 							// Print the received block
 							printf("Request is ready to be processed. Info:\n\tblockID = %d\n\tblock = [", waitingTransaction->blockID);
 							for(int i = 0; i < 10; i++)
@@ -739,7 +743,11 @@ int main(int argc, char **argv)
 			// Something can be read from stdin
 			if(FD_ISSET(STDIN, &fdSet))
 			{
-				parseCommand(&selfInfo, vectorClock, &currentChain, peers, connectionFDs, waitingTransaction);
+				parseCommand(&selfInfo, vectorClock, &currentChain, peers, connectionFDs, &waitingTransaction);
+				if(waitingTransaction == NULL)
+					printf("WaitingTransaction = NULL\n");
+				else
+					printf("WaitingTransaction != NULL\n");
 			}
 		}
 
