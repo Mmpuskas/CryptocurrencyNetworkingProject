@@ -696,6 +696,19 @@ int main(int argc, char **argv)
 		printf("Connection successful.\n");
 
 		// Register
+		int inputFlag = 1; // Set to 0 when they say the appropriate phrase
+		while(inputFlag)
+		{
+			char *inputBuffer = malloc(20 * sizeof(char));
+			size_t len = 20;
+			getline(&inputBuffer, &len, stdin);
+
+			if(strcmp(inputBuffer, "register\n") == 0)
+				inputFlag = 0;
+			else
+				printf("ERROR: Must register, then query.\n");
+		}
+
 		struct toServerMessage toMessage;
 		toMessage.type = 1;
 		memcpy(&toMessage.clientInfo, &selfInfo, sizeof(struct toServerMessage));
@@ -720,6 +733,18 @@ int main(int argc, char **argv)
 		}
 
 		// Query
+		inputFlag = 1;
+		while(inputFlag)
+		{
+			char *inputBuffer = malloc(20 * sizeof(char));
+			size_t len = 20;
+			getline(&inputBuffer, &len, stdin);
+
+			if(strcmp(inputBuffer, "query\n") == 0)
+				inputFlag = 0;
+			else
+				printf("ERROR: Must query.\n");
+		}
 		printf("Querying server.\n");
 		toMessage.type = 0;
 		write(serverFD, &toMessage, sizeof(struct toServerMessage));
