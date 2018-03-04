@@ -704,10 +704,35 @@ int main(int argc, char **argv)
 		}
 
 		// Query
-		printf("Got to query. Exiting\n");
-		exit(0);
-		
-		// TODO: Fill first block, ID, and peers
+		printf("Querying server.\n");
+		toMessage.type = 0;
+		write(serverFD, &toMessage, sizeof(struct toServerMessage));
+
+		n = read(serverFD, &fromMessage, sizeof(struct fromServerMessage));
+		if(n > 0)
+		{
+			if(fromMessage.type == 0)
+			{
+				// Save peers and set the first block
+				memcpy(&peers, &fromMessage.peers.minerInfos, (sizeof(struct minerInfo) * 10));
+				for(int i = 0; i < 10; i++)
+				{
+					currentChain.blocks[0].coinAmounts[i] = fromMessage.peers.minerInfos[i].initialCoins;
+					currentChain.blocks[0].timestamp[i] = 0;
+				}
+				currentChain.length++;
+				currentChain.blocks[0].blockID++;
+
+				printf("Blockchain updated with initial coins:\n\tblockID = %d\n\tblock = [", currentChain.blocks[currentChain.length - 1].blockID);
+				for(int i = 0; i < 10; i++)
+					printf("%d, ", currentChain.blocks[currentChain.length - 1].coinAmounts[i]);
+				printf("]\n\ttimestamp = [");
+				for(int i = 0; i < 10; i++)
+					printf("%d, ", currentChain.blocks[currentChain.length - 1].timestamp[i]);
+				printf("]\n");
+			}
+			printf("Query response received. NumOfMiners = %d\n", fromMessage.peers.numOfMiners);
+		}
 	}
 	else
 	{
