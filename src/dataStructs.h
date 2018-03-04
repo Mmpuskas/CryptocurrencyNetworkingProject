@@ -41,7 +41,7 @@ struct minerQuery
 
 struct blockMessage
 {
-	// 0 = request, 1 = proof
+	// 0 = request, 1 = proof, 2 = deregister
 	int type;
 
 	struct block messageBlock;

@@ -44,6 +44,69 @@ int checkUniqueID(struct blockchain* currentChain, int ID)
 	return isUnique;
 }
 
+void printBlockchain(struct blockchain* currentChain)
+{
+	printf("Printing blockchain in form [block](timestamp).\n");
+
+	for(int i = 0; i < currentChain->length; i++)
+	{
+		// Print block
+		printf("[");
+		for(int j = 0; j < 10; j++)
+			printf("%d, ", currentChain->blocks[i].coinAmounts[j]);
+		printf("](");
+
+		// Print timestamp
+		for(int j = 0; j < 10; j++)
+			printf("%d, ", currentChain->blocks[i].timestamp[j]);
+		printf(")\n");
+	}
+}
+
+void deregisterFromServer(int serverFD)
+{
+	printf("Deregistering with server.\n");
+
+	struct toServerMessage toMessage;
+	toMessage.type = 2;
+
+	// Send the deregister message
+	write(serverFD, &toMessage, sizeof(struct toServerMessage));
+
+	// Check the response
+	struct fromServerMessage fromMessage;
+	ssize_t n = read(serverFD, &fromMessage, sizeof(struct fromServerMessage));
+	if(n > 0)
+	{
+		if(fromMessage.type == 2 && strcmp(fromMessage.returnCode, "SUCCESS") == 0)
+		{
+			printf("Deregistration Successful.\n");
+		}
+		else
+		{
+			printf("Deregistration failed.\n");
+			exit(1);
+		}
+	}
+}
+
+void broadcastDeregister(struct minerInfo* selfInfo, struct minerInfo* peers, int* connectionFDs)
+{
+	struct blockMessage message;
+	message.type = 2;
+
+	// For each miner in our list, write the transaction
+	for(int i = 0; i < 10; i++)
+	{
+		// Skip ourselves and removed peers
+		if(i == selfInfo->identifier || peers[i].identifier == -1)
+			continue;
+
+		printf("Broadcasting deregister to %s (%d)\n", peers[i].username, i);
+		write(connectionFDs[i], &message, sizeof(struct blockMessage));
+	}
+}
+
 void broadcastProof(struct minerInfo* selfInfo, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
 {
 	struct blockMessage message;
@@ -176,6 +239,33 @@ void printClock(int* vectorClock)
 	printf("%d]\n", vectorClock[9]);
 }
 
+void sendSave(int serverFD, char* fileName)
+{
+	printf("Sending save request to server.\n");
+	struct toServerMessage toMessage;
+	toMessage.type = 3;
+	strcpy(toMessage.fileName, fileName);
+
+	// Send the deregister message
+	write(serverFD, &toMessage, sizeof(struct toServerMessage));
+
+	// Check the response
+	struct fromServerMessage fromMessage;
+	ssize_t n = read(serverFD, &fromMessage, sizeof(struct fromServerMessage));
+	if(n > 0)
+	{
+		if(fromMessage.type == 2 && strcmp(fromMessage.returnCode, "SUCCESS") == 0)
+		{
+			printf("Save Successful.\n");
+		}
+		else
+		{
+			printf("Save failed.\n");
+			exit(1);
+		}
+	}
+}
+
 void broadcastTransaction(struct minerInfo* selfInfo, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
 {
 	struct blockMessage message;
@@ -265,7 +355,7 @@ void parseTransfer(char inputBuffer[10], struct minerInfo* selfInfo, int* vector
 	}
 }
 
-void parseCommand(struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs, struct block** waitingTransaction)
+void parseCommand(int serverFD, struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs, struct block** waitingTransaction)
 {
 	// Check what command we got
 	char inputBuffer[20];
@@ -296,6 +386,32 @@ void parseCommand(struct minerInfo* selfInfo, int* vectorClock, struct blockchai
 	else if(strcmp(command, "clock") == 0)
 	{
 		printClock(vectorClock);
+	}
+	else if(strcmp(command, "deregister") == 0)
+	{
+		deregisterFromServer(serverFD);
+		broadcastDeregister(selfInfo, peers, connectionFDs);
+		printBlockchain(currentChain);
+		printf("\nDeregister complete. Shutting down.\n");
+		exit(0);
+	}
+	else if(strcmp(command, "chain") == 0)
+	{
+		printBlockchain(currentChain);
+	}
+	else if(strcmp(command, "save") == 0)
+	{
+		// Get the rest of the command
+		bufferIndex++;
+		char restOfLine[20];
+		int len = strlen(&inputBuffer[bufferIndex]) - 1;
+		strncpy(restOfLine, &inputBuffer[bufferIndex], len);
+		restOfLine[len] = '\0';
+
+		if(len == 0)
+			printf("Must include filename to save to.\n");
+		else
+			sendSave(serverFD, restOfLine);
 	}
 	else
 	{
@@ -905,6 +1021,13 @@ int main(int argc, char **argv)
 									printf("Received proof is invalid. Duplicate ID. Continuing with own processing.\n");
 							}
 						}
+						else if(incomingTransaction.type == 2)
+						{
+							// Deregister
+							printf("Deregister command received. Removed %s (%d)\n", peers[i].username, i);
+							peers[i].identifier = -1;
+							connectionFDs[i] = -1;
+						}
 						else
 							printf("ERROR: Received message of unexpected format.\n");
 					}
@@ -914,7 +1037,7 @@ int main(int argc, char **argv)
 			// Something can be read from stdin
 			if(FD_ISSET(STDIN, &fdSet))
 			{
-				parseCommand(&selfInfo, vectorClock, &currentChain, peers, connectionFDs, &waitingTransaction);
+				parseCommand(serverFD, &selfInfo, vectorClock, &currentChain, peers, connectionFDs, &waitingTransaction);
 			}
 		}
 

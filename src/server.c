@@ -192,12 +192,51 @@ int main(void)
 						else if(toMessage.type == 2)
 						{
 							// Deregister
-							printf("Received save message.\n");
+							printf("Received deregister message.\n");
+
+							// Send the response
+							struct fromServerMessage fromMessage;
+							fromMessage.type = 2; // Deregister response
+							strcpy(fromMessage.returnCode, "SUCCESS");
+
+							write(connectionFDs[i], &fromMessage, sizeof(struct fromServerMessage));
+							connectionFDs[i] = -1;
+							printf("Successfully deregistered %s (%d). Sent response.\n", clients[i].username, i);
 						}
 						else if(toMessage.type == 3)
 						{
 							// Save
-							printf("Received save message.\n");
+							printf("Received save message. Filename = %s\n", toMessage.fileName);
+
+							FILE* saveFP;
+							saveFP = fopen(toMessage.fileName, "w");
+
+							// First line: number of miners
+							fprintf(saveFP, "%d\n", getNumMiners(connectionFDs));
+
+							// Following lines: <username> <IP> <port> <initial coins> <ID>
+							for(int j = 0; j < 10; j++)
+							{
+								// Skip connections that have been invalidated
+								if(connectionFDs[j] == -1)
+									continue;
+
+								struct in_addr ipAddr = clients[i].address.sin_addr;
+								char ipStr[INET_ADDRSTRLEN];
+								inet_ntop(AF_INET, &ipAddr, ipStr, INET_ADDRSTRLEN);
+								fprintf(saveFP, "%s %s %d %d %d\n", clients[i].username, ipStr, clients[i].address.sin_port, clients[i].initialCoins, i);
+							}
+
+							fclose(saveFP);
+
+							// Send the response
+							struct fromServerMessage fromMessage;
+							fromMessage.type = 2; // Save response
+							strcpy(fromMessage.returnCode, "SUCCESS");
+
+							write(connectionFDs[i], &fromMessage, sizeof(struct fromServerMessage));
+
+							printf("Successfully saved to file %s\n", toMessage.fileName);
 						}
 					}
 				}
