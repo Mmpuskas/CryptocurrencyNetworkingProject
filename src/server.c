@@ -142,6 +142,7 @@ int main(void)
                     {
  						// Endpoint died, remove it.
                         connectionFDs[i] = -1;
+						clients[i].identifier = -1;
 
                         printf("Removed %d: connection terminated. Err = %s\n", i, strerror(errno));
 					}
@@ -204,6 +205,7 @@ int main(void)
 
 							write(connectionFDs[i], &fromMessage, sizeof(struct fromServerMessage));
 							connectionFDs[i] = -1;
+							clients[i].identifier = -1;
 							printf("Successfully deregistered %s (%d). Sent response.\n", clients[i].username, i);
 						}
 						else if(toMessage.type == 3)
