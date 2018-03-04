@@ -16,6 +16,7 @@ void DieWithError(const char *errorMessage)
     exit(1);
 }
 
+// Reads through connectionFDs to find active miners and returns the number
 int getNumMiners(int* connectionFDs)
 {
 	int numOfMiners = 0;
@@ -27,6 +28,7 @@ int getNumMiners(int* connectionFDs)
 	return numOfMiners;
 }
 
+// Returns the first open ID in connectionFDs
 int getOpenID(int* connectionFDs)
 {
 	for(int i = 0; i < 10; i++)
@@ -36,6 +38,7 @@ int getOpenID(int* connectionFDs)
 	return -1;
 }
 
+// Connects to the new client and assigns them an ID
 void connectToClient(int* socketFD, struct minerInfo* clients, int* connectionFDs)
 {
     printf("\nNew connection found. Attempting to connect.\n");
