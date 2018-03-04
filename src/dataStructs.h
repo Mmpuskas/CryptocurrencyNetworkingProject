@@ -5,7 +5,7 @@
 
 #define BLOCKCHAINLENGTH 200
 
-/** This file is for writing the data structures for both the server and miners */
+// A block in the blockchain
 struct block
 {
 	// The change in amounts for each peer, indexed by ther identifier
@@ -18,12 +18,14 @@ struct block
 	int timestamp[10];
 };
 
+// The blockchain, including length
 struct blockchain
 {
 	int length;
 	struct block blocks[BLOCKCHAINLENGTH];
 };
 
+// All info to define a client or peer
 struct minerInfo
 {
 	int identifier;
@@ -39,6 +41,7 @@ struct minerQuery
 	struct minerInfo minerInfos[10];
 };
 
+// Defines a message between peers
 struct blockMessage
 {
 	// 0 = request, 1 = proof, 2 = deregister
@@ -47,6 +50,7 @@ struct blockMessage
 	struct block messageBlock;
 };
 
+// For messages to the server
 struct toServerMessage
 {
 	// 0 = query, 1 = register, 2 = deregister, 3 = save
@@ -59,6 +63,7 @@ struct toServerMessage
 	char fileName[20];
 };
 
+// For messages from the server
 struct fromServerMessage
 {
 	// 0 = peers, 1 = (returnCode,identifier), 2 = returnCode
