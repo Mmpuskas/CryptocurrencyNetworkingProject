@@ -19,6 +19,7 @@ void DieWithError(const char *errorMessage)
 	exit(1);
 }
 
+// Initializes the socketFD. Note: Not tested for general use, only use with socketFD
 void setupSocketFD(int* socketFD, struct minerInfo* selfInfo)
 {
 	unsigned int addrLen = sizeof(struct sockaddr_in);
@@ -34,6 +35,7 @@ void setupSocketFD(int* socketFD, struct minerInfo* selfInfo)
 		DieWithError("client: listen() failed");
 }
 
+// Checks if the block ID is unique within the chain
 int checkUniqueID(struct blockchain* currentChain, int ID)
 {
 	int isUnique = 1;
@@ -44,6 +46,7 @@ int checkUniqueID(struct blockchain* currentChain, int ID)
 	return isUnique;
 }
 
+// Prints the blockchain and timestamps
 void printBlockchain(struct blockchain* currentChain)
 {
 	printf("Printing blockchain in form [block](timestamp).\n");
@@ -63,6 +66,7 @@ void printBlockchain(struct blockchain* currentChain)
 	}
 }
 
+// Deregisters from the server and reads the response
 void deregisterFromServer(int serverFD)
 {
 	printf("Deregistering with server.\n");
@@ -90,6 +94,7 @@ void deregisterFromServer(int serverFD)
 	}
 }
 
+// Broadcasts a deregister to all peers
 void broadcastDeregister(struct minerInfo* selfInfo, struct minerInfo* peers, int* connectionFDs)
 {
 	struct blockMessage message;
@@ -107,6 +112,7 @@ void broadcastDeregister(struct minerInfo* selfInfo, struct minerInfo* peers, in
 	}
 }
 
+// Broadcasts a found proof to all peers
 void broadcastProof(struct minerInfo* selfInfo, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
 {
 	struct blockMessage message;
@@ -125,6 +131,7 @@ void broadcastProof(struct minerInfo* selfInfo, struct minerInfo* peers, int* co
 	}
 }
 
+// Adds a block to the given blockchain
 void addBlock(struct blockchain* currentChain, struct block* waitingTransaction)
 {
 	// Add the new block to the chain
@@ -146,6 +153,9 @@ void addBlock(struct blockchain* currentChain, struct block* waitingTransaction)
 	printf("]\n");
 }
 
+// Validates the values and timestamp along the entire blockchain, then checks the new block against the given blockchain. 
+// If timestamp is ever earlier, returns 1 
+// If totals ever go negative, returns 2
 int validateBlock(struct blockchain* currentChain, struct block* waitingTransaction)
 {
 	int invalidCode = 0;
@@ -239,6 +249,7 @@ void printClock(int* vectorClock)
 	printf("%d]\n", vectorClock[9]);
 }
 
+// Sends a save request to the server and reads the response
 void sendSave(int serverFD, char* fileName)
 {
 	printf("Sending save request to server.\n");
@@ -266,6 +277,7 @@ void sendSave(int serverFD, char* fileName)
 	}
 }
 
+// Broadcasts a transaction to all peers
 void broadcastTransaction(struct minerInfo* selfInfo, struct minerInfo* peers, int* connectionFDs, struct block* waitingTransaction)
 {
 	struct blockMessage message;
@@ -285,6 +297,7 @@ void broadcastTransaction(struct minerInfo* selfInfo, struct minerInfo* peers, i
 	}
 }
 
+// Parses the values of a transfer command and calls broadcastTransaction if they're valid
 void parseTransfer(char inputBuffer[10], struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs, struct block** waitingTransaction)
 {
 	int bufferIndex = 0;
@@ -355,6 +368,8 @@ void parseTransfer(char inputBuffer[10], struct minerInfo* selfInfo, int* vector
 	}
 }
 
+// Parses a command from stdin
+// Valid commands are: transfer, clock, deregister, chain, and save
 void parseCommand(int serverFD, struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs, struct block** waitingTransaction)
 {
 	// Check what command we got
@@ -419,7 +434,8 @@ void parseCommand(int serverFD, struct minerInfo* selfInfo, int* vectorClock, st
 	}
 }
 
-// Returns 0 if no value in One is less that the parallel value in Two, 1 if change
+// Compares two vector clocks
+// Returns 0 if clockOne is later than clockTwo, else returns 1
 int compareVectorClocks(int* clockOne, int* clockTwo)
 {
 	int returnVal = 0;
@@ -430,6 +446,7 @@ int compareVectorClocks(int* clockOne, int* clockTwo)
 	return returnVal;
 }
 
+// Updates vectorClock to any later values in timestamp
 void updateClock(int* vectorClock, int* timestamp)
 {
 	for(int i = 0; i < 10; i++)
@@ -437,6 +454,9 @@ void updateClock(int* vectorClock, int* timestamp)
 			vectorClock[i] = timestamp[i];
 }
 
+// Runs through the list of peers given by the server and establishes connections with each
+// Then waits for blockchain response and replaces own blockchain if its later
+// Connections are saved in connectionFDs, indexed by ID
 int establishConnections(struct minerInfo* selfInfo, struct blockchain* currentChain, int* vectorClock, struct minerInfo* peers, int* connectionFDs)
 {
 	printf("\nEstablishing connections.\n");
@@ -510,6 +530,7 @@ int establishConnections(struct minerInfo* selfInfo, struct blockchain* currentC
 	return 1;
 }
 
+// Connects to the new peer and sends it the current blockchain
 int connectToClient(int* socketFD, struct minerInfo* selfInfo, int* vectorClock, struct blockchain* currentChain, struct minerInfo* peers, int* connectionFDs)
 {
 	printf("\nNew connection found. Attempting to connect.\n");
@@ -568,6 +589,7 @@ int connectToClient(int* socketFD, struct minerInfo* selfInfo, int* vectorClock,
 	}
 }
 
+// Initializes a block based on dummy data format
 struct block initBlock(char fileBuffer[255])
 {
 	struct block returnBlock;
@@ -580,7 +602,6 @@ struct block initBlock(char fileBuffer[255])
 	int i = 0;
 	int j = 0;
 	int k = 0;
-	//hello there
 	char coinBuffer[5];
 	memset(coinBuffer, 0, 5);
 
@@ -607,6 +628,7 @@ struct block initBlock(char fileBuffer[255])
 	return returnBlock;
 }
 
+// Initializes peers based on dummy data format
 struct minerQuery initPeers(char fileBuffer[255])
 {
 	struct minerQuery peerQuery;
@@ -687,7 +709,6 @@ struct minerQuery initPeers(char fileBuffer[255])
 	return peerQuery;
 }
 
-/** This file is for writing the client and server sections of the miner. */
 int main(int argc, char **argv)
 {
 	///////////////////////////////////////
