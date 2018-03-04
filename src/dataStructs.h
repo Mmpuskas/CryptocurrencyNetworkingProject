@@ -61,7 +61,7 @@ struct toServerMessage
 
 struct fromServerMessage
 {
-	// 0 = query response (numMiners, peers), 1 = other (returnCode)
+	// 0 = query response (numMiners, peers), 1 = (returnCode,identifier), 2 = returnCode
 	int type;
 
 	// For query

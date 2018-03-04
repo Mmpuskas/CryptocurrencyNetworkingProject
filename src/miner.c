@@ -577,9 +577,19 @@ int main(int argc, char **argv)
 			currentChain.blocks[i].timestamp[j] = 0;
 		}
 	}
+
+	// Data defining this miner
+	///////////////////////////////////////
+	
+	struct block* waitingTransaction = NULL;
   
 	int numOfMiners = 0;
     struct minerInfo peers[10];
+
+	// Initialize FDs to invalid
+	int connectionFDs[10];
+	for(int i = 0; i < 10; i++)
+		connectionFDs[i] = -1;
 
 	// Socket info
 	fd_set fdSet;
@@ -591,14 +601,19 @@ int main(int argc, char **argv)
 	int serverFD = socket(AF_INET, SOCK_STREAM, 0);
 	struct sockaddr_in serverAddress;
 
-	// Data defining this miner
-	///////////////////////////////////////
-	
-	struct block* waitingTransaction = NULL;
+	/* Set up the socket */
+	unsigned int addrLen = sizeof(struct sockaddr_in);
+	printf("Setting up socket for listening.\n");
+	if((socketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+		DieWithError("client: socket() failed");
+	setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(int));
+	if(bind(socketFD, (struct sockaddr *) &selfInfo.address, addrLen) < 0)
+		DieWithError("client: bind() failed");
+	if(listen(socketFD, BACKLOG) < 0)
+		DieWithError("client: listen() failed");
 
 	/* Checking if we're reading dummy data from a file */
 	// If we're given an argument, treat it as a filename
-	unsigned int addrLen = sizeof(struct sockaddr_in);
 	if(argc == 2)
 	{
 		printf("Loading dummy data from given file...\n");
@@ -662,10 +677,36 @@ int main(int argc, char **argv)
 
 		printf("Connecting to server.\n");
 		connect(serverFD, (struct sockaddr *) &serverAddress, sizeof(serverAddress));
-		printf("Connection successful. Registering with server.\n");
+		printf("Connection successful.\n");
 
 		// Register
+		struct toServerMessage toMessage;
+		toMessage.type = 1;
+		memcpy(&toMessage.clientInfo, &selfInfo, sizeof(struct toServerMessage));
+
+		printf("Registering with server.\n");
+		write(serverFD, &toMessage, sizeof(struct toServerMessage));
+
+		struct fromServerMessage fromMessage;
+		ssize_t n = read(serverFD, &fromMessage, sizeof(struct fromServerMessage));
+		if(n > 0)
+		{
+			if(fromMessage.type == 1 && strcmp(fromMessage.returnCode, "SUCCESS") == 0)
+			{
+				printf("Registration Successful.\n");
+				selfInfo.identifier = fromMessage.identifier;
+			}
+			else
+			{
+				printf("Registration failed. Exiting.\n");
+				exit(1);
+			}
+		}
+
 		// Query
+		printf("Got to query. Exiting\n");
+		exit(0);
+		
 		// TODO: Fill first block, ID, and peers
 	}
 	else
@@ -673,21 +714,6 @@ int main(int argc, char **argv)
 		printf("Unknown number of arguments\n");
 		exit(1);
 	}
-
-	// Initialize FDs to invalid
-	int connectionFDs[10];
-	for(int i = 0; i < 10; i++)
-		connectionFDs[i] = -1;
-
-	/* Set up the socket */
-	printf("Setting up socket for listening.\n");
-	if((socketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-		DieWithError("client: socket() failed");
-	setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(int));
-	if(bind(socketFD, (struct sockaddr *) &selfInfo.address, addrLen) < 0)
-		DieWithError("client: bind() failed");
-	if(listen(socketFD, BACKLOG) < 0)
-		DieWithError("client: listen() failed");
 
 	/* Start establishing connections */
 	//### select() example code taken from https://stackoverflow.com/questions/2284428/in-c-networking-using-select-do-i-first-have-to-listen-and-accept ###
