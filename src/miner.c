@@ -13,6 +13,27 @@
 #define BLOCKCHAINLENGTH 200
 #define STDIN 0
 
+void DieWithError(const char *errorMessage)
+{
+	perror(errorMessage);
+	exit(1);
+}
+
+void setupSocketFD(int* socketFD, struct minerInfo* selfInfo)
+{
+	unsigned int addrLen = sizeof(struct sockaddr_in);
+	int reuse = 1;
+
+	printf("Setting up socket for listening.\n");
+	if((*socketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+		DieWithError("client: socket() failed");
+	setsockopt(*socketFD, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(int));
+	if(bind(*socketFD, (struct sockaddr *) &(selfInfo->address), addrLen) < 0)
+		DieWithError("client: bind() failed");
+	if(listen(*socketFD, BACKLOG) < 0)
+		DieWithError("client: listen() failed");
+}
+
 int checkUniqueID(struct blockchain* currentChain, int ID)
 {
 	int isUnique = 1;
@@ -313,7 +334,10 @@ int establishConnections(struct minerInfo* selfInfo, struct blockchain* currentC
 			continue;
 
 		// Setup the socket
-		printf("\nAttempting connection to: %d\n", htons(peers[i].address.sin_port));
+		struct in_addr ipAddr = peers[i].address.sin_addr;
+		char ipStr[INET_ADDRSTRLEN];
+		inet_ntop(AF_INET, &ipAddr, ipStr, INET_ADDRSTRLEN);
+		printf("\nAttempting connection to: %s:%d\n", ipStr, htons(peers[i].address.sin_port));
 		connectionFDs[i] = socket(AF_INET, SOCK_STREAM, 0);
 
 		// Try to connect
@@ -426,12 +450,6 @@ int connectToClient(int* socketFD, struct minerInfo* selfInfo, int* vectorClock,
 		printf("Error receiving info from new client.\n");
 		return -1;
 	}
-}
-
-void DieWithError(const char *errorMessage)
-{
-	perror(errorMessage);
-	exit(1);
 }
 
 struct block initBlock(char fileBuffer[255])
@@ -596,21 +614,11 @@ int main(int argc, char **argv)
 	struct timeval timeVal;
 	int socketFD;
 	int max = 0;
-	int reuse = 1;
 
 	int serverFD = socket(AF_INET, SOCK_STREAM, 0);
 	struct sockaddr_in serverAddress;
 
-	/* Set up the socket */
 	unsigned int addrLen = sizeof(struct sockaddr_in);
-	printf("Setting up socket for listening.\n");
-	if((socketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-		DieWithError("client: socket() failed");
-	setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(int));
-	if(bind(socketFD, (struct sockaddr *) &selfInfo.address, addrLen) < 0)
-		DieWithError("client: bind() failed");
-	if(listen(socketFD, BACKLOG) < 0)
-		DieWithError("client: listen() failed");
 
 	/* Checking if we're reading dummy data from a file */
 	// If we're given an argument, treat it as a filename
@@ -650,6 +658,9 @@ int main(int argc, char **argv)
 		numOfMiners = tempQuery.numOfMiners;
 		for(int i = 0; i < 10; i++)
 			peers[i] = tempQuery.minerInfos[i];
+
+		/* Set up the socket */
+		setupSocketFD(&socketFD, &selfInfo);
 		
 		fclose(initializerFP);
 		printf("Data loaded. Username = %s Port = %d\n", selfInfo.username, htons(selfInfo.address.sin_port));
@@ -657,6 +668,7 @@ int main(int argc, char **argv)
 	else if(argc == 7) // miner <Username> <Coins> <Self-IP> <Self-port> <Server-IP> <Server-port>
 	{
 		/** Setup self info */
+		printf("Loading command line data.\n");
 		// Username
 		strcpy(selfInfo.username, argv[1]);
 		// Coins
@@ -673,7 +685,11 @@ int main(int argc, char **argv)
 		serverAddress.sin_family = AF_INET;
 		inet_pton(AF_INET, argv[5], &serverAddress.sin_addr);
 		serverAddress.sin_port = htons(atoi(argv[6]));
-		printf("Data loaded. Username = %s Coins = %d Port = %d\n", selfInfo.username, selfInfo.initialCoins, htons(selfInfo.address.sin_port));
+
+		printf("Data loaded. Username = %s Coins = %d Address = %s:%d\n", selfInfo.username, selfInfo.initialCoins, argv[3], htons(selfInfo.address.sin_port));
+
+		/* Set up the socket */
+		setupSocketFD(&socketFD, &selfInfo);
 
 		printf("Connecting to server.\n");
 		connect(serverFD, (struct sockaddr *) &serverAddress, sizeof(serverAddress));
@@ -693,8 +709,8 @@ int main(int argc, char **argv)
 		{
 			if(fromMessage.type == 1 && strcmp(fromMessage.returnCode, "SUCCESS") == 0)
 			{
-				printf("Registration Successful.\n");
 				selfInfo.identifier = fromMessage.identifier;
+				printf("Registration Successful. ID = %d\n", selfInfo.identifier);
 			}
 			else
 			{
@@ -730,9 +746,12 @@ int main(int argc, char **argv)
 				for(int i = 0; i < 10; i++)
 					printf("%d, ", currentChain.blocks[currentChain.length - 1].timestamp[i]);
 				printf("]\n");
+
+				printf("Query response received. NumOfMiners = %d\n", fromMessage.peers.numOfMiners);
 			}
-			printf("Query response received. NumOfMiners = %d\n", fromMessage.peers.numOfMiners);
 		}
+
+		printf("Done talking to server.\n");
 	}
 	else
 	{
