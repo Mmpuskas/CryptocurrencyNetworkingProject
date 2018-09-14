@@ -1,7 +1,6 @@
 # Simplified bitcoin project
 
-The focus of this project was on the networking aspects of the client/server and peer-to-peer relationships of a cryptocurrency.
-src/client.c and src/server.c are the main source files.
+The focus of this project was on the networking aspects of the client/server and peer-to-peer relationships of a cryptocurrency. The crypto aspects of cryptocurrencies were left out to maintain the focus.
 
 # How to use
 To compile:
